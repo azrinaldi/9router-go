@@ -3,6 +3,8 @@ package executor
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -801,6 +803,86 @@ func TestGeminiWebOmitsAtForAnAnonymousSession(t *testing.T) {
 	}
 	if strings.Contains(form, "at=") {
 		t.Errorf("anonymous turn body = %q, must not carry an at token", form)
+	}
+}
+
+// TestGeminiWebSignsTheRegistryCallForASignedInSession pins the `authorization`
+// header on the model-registry RPC.
+//
+// That RPC is what answers "which models may this session use", so it is the call
+// the site judges the caller on. A cookie presented without the signature can be
+// answered as an anonymous visitor — the session still works, still returns a
+// model list, and offers fewer models than the account has. Nothing downstream
+// can tell that apart from an account that genuinely lacks them.
+func TestGeminiWebSignsTheRegistryCallForASignedInSession(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		APIKey:   "SAPISID=sapisid-value; __Secure-1PSID=psid-value",
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+	got := upstream.header("/_/BardChatUi/data/batchexecute").Get("authorization")
+	if !strings.HasPrefix(got, "SAPISIDHASH ") {
+		t.Fatalf("authorization = %q, want a SAPISIDHASH value", got)
+	}
+	// The digest is over "<seconds> <SAPISID> <origin>", so verifying the shape
+	// means recomputing it rather than trusting the prefix.
+	parts := strings.SplitN(strings.TrimPrefix(got, "SAPISIDHASH "), "_", 2)
+	if len(parts) != 2 {
+		t.Fatalf("authorization = %q, want <seconds>_<hex>", got)
+	}
+	// The origin signed over is the one the session dials, which the test config
+	// points at the fake upstream rather than at the real site.
+	sum := sha1.Sum([]byte(parts[0] + " sapisid-value " + server))
+	if want := hex.EncodeToString(sum[:]); parts[1] != want {
+		t.Errorf("digest = %q, want %q over the SAPISID and origin", parts[1], want)
+	}
+}
+
+// TestGeminiWebDoesNotSignAnAnonymousCall is the other half: with nothing to sign
+// there must be no header, because a malformed one is worse than none.
+func TestGeminiWebDoesNotSignAnAnonymousCall(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+	if got := upstream.header("/_/BardChatUi/data/batchexecute").Get("authorization"); got != "" {
+		t.Errorf("authorization = %q, want empty for a session with no SAPISID", got)
+	}
+}
+
+// TestGeminiWebDoesNotSignWithAPrefixOfAnotherCookieName guards the cookie lookup.
+//
+// __Secure-1PSID is a prefix of __Secure-1PSIDTS, and signing with the wrong one
+// produces a header the site rejects without a diagnostic, so the match has to be
+// on the whole name.
+func TestGeminiWebDoesNotSignWithAPrefixOfAnotherCookieName(t *testing.T) {
+	// A credential carrying __Secure-1PSIDTS but no SAPISID has nothing to sign.
+	if got := geminiWebSAPISIDHash("__Secure-1PSIDTS=ts-value; __Secure-1PSID=psid-value", "https://gemini.google.com"); got != "" {
+		t.Errorf("hash = %q, want empty: the credential carries no SAPISID", got)
+	}
+	// And the real SAPISID is picked up when it is present.
+	if got := geminiWebSAPISIDHash("SAPISID=real-value", "https://gemini.google.com"); !strings.HasPrefix(got, "SAPISIDHASH ") {
+		t.Errorf("hash = %q, want a SAPISIDHASH value", got)
 	}
 }
 

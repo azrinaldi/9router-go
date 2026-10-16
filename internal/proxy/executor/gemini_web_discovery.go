@@ -40,12 +40,22 @@ func (s *geminiWebSession) batchPayload(ctx context.Context, rpcID, payload stri
 	query.Set("bl", tokens.bl)
 	query.Set("f.sid", tokens.fSid)
 
+	// The registry RPC is the call that decides which models a session may use,
+	// so it carries the signed-in caller's signature when the credential can
+	// produce one. Without it a configured cookie can still be answered as an
+	// anonymous visitor, which is the difference between "Pro and Argon are
+	// offered" and "Flash-Lite only".
+	headers := map[string]string{}
+	if auth := geminiWebSAPISIDHash(s.cookie, s.endpoints.origin); auth != "" {
+		headers["authorization"] = auth
+	}
+
 	requestCtx, cancel := context.WithTimeout(ctx, geminiWebRPCTimeout)
 	defer cancel()
 	response, err := s.do(requestCtx, http.MethodPost,
 		s.endpoints.batch+"?"+query.Encode(),
 		strings.NewReader(geminiWebFormBody(tokens.at, string(body))),
-		"application/x-www-form-urlencoded;charset=UTF-8", nil)
+		"application/x-www-form-urlencoded;charset=UTF-8", headers)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-web: call %s: %w", rpcID, err)
 	}

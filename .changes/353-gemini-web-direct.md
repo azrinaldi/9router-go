@@ -249,3 +249,30 @@ message cannot be right for both cases: telling someone with a stale cookie that
 "an anonymous session reaches one model" sends them looking for the cookie they
 already pasted, when the fix is to replace it. With no credential the advice says
 how to obtain one; with one configured it says to paste a fresh one.
+
+### feat(gemini-web): post the signed-in page's SNlM0e token as `at`
+
+The reference implementation for this endpoint posts `at` alongside `f.req`, and
+treats its absence on a signed-in page as an expired session —
+`could not extract SNlM0e (at token); session may be expired`, status 401. This
+executor did not post it at all, so every request carried the shape an anonymous
+visitor sends.
+
+That survived review because an anonymous page genuinely omits `SNlM0e` — a live
+fetch of `/app` without a cookie returns `cfb2h` and `FdrFJe` and no `at` — and an
+anonymous session is the only one that had been exercised end to end. A signed-in
+session is exactly the case the token exists for, and its absence was the one
+difference between this executor's request and the request the page's own
+JavaScript makes. Reported from a user about to use a signed-in account, not
+caught here.
+
+The bootstrap now extracts `SNlM0e` opportunistically rather than requiring it:
+it must stay optional because an anonymous page omits it, so both cases keep the
+shape they had. When a cookie is configured and the page still carries no token,
+the site served the visitor's page, which is logged once per session instead of
+surfacing later as a model refusal that blames the model.
+
+**Verified**: two tests pin the field — a page carrying `SNlM0e` and a page
+without it — over both RPCs an authenticated session uses. The first was confirmed
+to fail when the token is dropped from the form, so it catches the regression it
+describes rather than passing vacuously.

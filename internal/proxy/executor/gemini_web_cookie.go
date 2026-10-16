@@ -1,8 +1,12 @@
 package executor
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	json "encoding/json/v2"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // GeminiWebCookieHeader renders a pasted Gemini Web credential as a Cookie
@@ -75,4 +79,48 @@ func geminiWebExpandCookieJSON(raw string) (string, bool) {
 		return "", false
 	}
 	return strings.Join(parts, "; "), true
+}
+
+// geminiWebSAPISIDHash renders the `authorization` header Google's batchexecute
+// endpoint expects from a signed-in caller.
+//
+// The scheme is `SAPISIDHASH <unix-seconds>_<sha1("<seconds> <SAPISID> <origin>")>`,
+// and it is what distinguishes a call made by a signed-in page from one made by
+// a visitor: the batchexecute RPC that answers "which models may this session
+// use" is the call that decides it, so a cookie presented without this header can
+// still be answered as anonymous.
+//
+// An empty value means the credential carries no SAPISID to sign with, which the
+// caller must treat as "send no header" rather than as a failure: an anonymous
+// session has nothing to sign and works without it.
+func geminiWebSAPISIDHash(cookie, origin string) string {
+	sapisid := geminiWebCookieValue(cookie, "SAPISID")
+	if sapisid == "" {
+		return ""
+	}
+	if origin == "" {
+		origin = geminiWebOrigin
+	}
+	seconds := time.Now().Unix()
+	sum := sha1.Sum([]byte(fmt.Sprintf("%d %s %s", seconds, sapisid, origin)))
+	return fmt.Sprintf("SAPISIDHASH %d_%s", seconds, hex.EncodeToString(sum[:]))
+}
+
+// geminiWebCookieValue reads one cookie's value out of a Cookie header.
+//
+// The match is on the whole name rather than a substring, because the names this
+// is used for are prefixes of others: SAPISID is a prefix of nothing here, but
+// __Secure-1PSID is a prefix of __Secure-1PSIDTS, and signing with the wrong
+// one produces a header the site rejects with no diagnostic.
+func geminiWebCookieValue(header, name string) string {
+	for _, part := range strings.Split(header, ";") {
+		key, value, found := strings.Cut(part, "=")
+		if !found {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
