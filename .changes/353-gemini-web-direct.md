@@ -191,6 +191,31 @@ cannot be exercised end to end here: it is served to a signed-in account only, a
 an anonymous session reports exactly one model (`Flash-Lite`), which is what the
 live `otAQ7b` probe returned.
 
+**The dashboard needed a second, separate edit, and that was found by running the
+thing rather than by the tests.** The catalogue reaches the dashboard from two
+places: the Go catalog feeds `/v1/models` and `/api/models/caps`, and
+`ProviderDetailView` renders its "Available Models" rows from
+`getModelsByProviderId()` in `web/src/lib/models.ts`. Both already answered with
+nine names, so every check passed while the provider page still showed three — a
+model the gateway would route and resolve was invisible in the UI that exists to
+configure it. Same failure shape as the `1016` false positive above: the layer
+under test was correct and the layer beside it was not.
+
+`models.ts` declares itself auto-generated from the upstream registry and has no
+generator in this repository, and nothing compares the two lists, so this drift is
+silent by construction. The file is not redundant — it carries 23 media providers
+the Go catalog does not — so it cannot simply be derived from the Go side; the
+parity that matters is per provider, and for this one it now holds 9 for 9 in both
+directions. Editing it by hand is correct but unguarded, and a test that pins this
+provider's two lists together would be the place to stop the next one from
+escaping the same way.
+
+**Verified in the running dashboard**, not only in the bundle: the provider page
+lists `gweb/gemini-argon` and `gweb/gemini-4-argon` beside the existing entries,
+the heading reads "Gemini Web" with no "(Free)", and the button counts "Check All
+Models (9)". The served asset contains `gemini-argon` and no occurrence of the old
+label.
+
 **Also removed the word "free" from the provider's name and messages.** The provider
 card read "Gemini Web (Free)", and the refusal text explained that an anonymous
 session reaches "the free model". Neither the plan nor the site's own naming calls
