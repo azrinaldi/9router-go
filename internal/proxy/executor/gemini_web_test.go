@@ -605,6 +605,128 @@ func TestGeminiWebRefusesASubstitutedModel(t *testing.T) {
 	}
 }
 
+// TestGeminiWebRefusalNamesTheCredentialThatWasTried pins the refusal's advice to
+// the credential the session actually presented.
+//
+// Telling a caller "an anonymous session reaches one model" when a cookie is
+// configured sends them looking for the cookie they already pasted, and the fix
+// is the opposite one: replace it, rather than supply what is already there.
+// Naming the wrong cause costs the support round trip the message exists to
+// avoid, so both branches are pinned.
+func TestGeminiWebRefusalNamesTheCredentialThatWasTried(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiKey      string
+		want        string
+		notExpected string
+	}{
+		{
+			name:        "no credential",
+			apiKey:      "",
+			want:        "An anonymous session reaches one model",
+			notExpected: "configured __Secure-1PSID reaches",
+		},
+		{
+			name:        "a credential is configured",
+			apiKey:      "__Secure-1PSID=stale-cookie-value",
+			want:        "The configured __Secure-1PSID reaches this one model only",
+			notExpected: "An anonymous session",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := newGeminiWebFakeUpstream(t)
+			server := withGeminiWebUpstream(t, upstream)
+
+			rec := httptest.NewRecorder()
+			err := ForwardGeminiWeb(rec, &Request{
+				Ctx:    context.Background(),
+				Config: geminiWebTestConfig(server),
+				APIKey: tt.apiKey,
+				Body:   geminiWebTestBody(t, "gemini-3.1-pro", "hi", nil),
+			})
+			if err == nil {
+				t.Fatal("a model the session does not offer must be refused")
+			}
+			message := err.Error()
+			if !strings.Contains(message, tt.want) {
+				t.Errorf("refusal = %q, want it to contain %q", message, tt.want)
+			}
+			if strings.Contains(message, tt.notExpected) {
+				t.Errorf("refusal = %q, must not claim %q for this credential", message, tt.notExpected)
+			}
+			if !strings.Contains(message, "Flash-Lite") {
+				t.Errorf("refusal must still name what the session offers; got %q", message)
+			}
+		})
+	}
+}
+
+// TestGeminiWebTreatsTheRouterPlaceholderAsNoCredential proves the value the
+// router substitutes for a credentialless provider is not sent to the site.
+//
+// A `NoAuth` provider is dispatched with its catalog `DefaultAPIKey`, so the
+// executor receives the word "anonymous" (or "public") as `req.APIKey` even
+// though nobody configured anything. Rendered as a cookie that becomes
+// `__Secure-1PSID=anonymous` on every request — a credential the user never
+// supplied, sent to a third party, and one that makes the session look
+// credentialed so a refusal blames a cookie that does not exist.
+func TestGeminiWebTreatsTheRouterPlaceholderAsNoCredential(t *testing.T) {
+	for _, placeholder := range []string{"anonymous", "public"} {
+		t.Run(placeholder, func(t *testing.T) {
+			upstream := newGeminiWebFakeUpstream(t)
+			upstream.streamBody = geminiWebStreamFixture("ok")
+			server := withGeminiWebUpstream(t, upstream)
+
+			rec := httptest.NewRecorder()
+			err := ForwardGeminiWeb(rec, &Request{
+				Ctx:      context.Background(),
+				Config:   geminiWebTestConfig(server),
+				APIKey:   placeholder,
+				Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+				IsStream: true,
+			})
+			if err != nil {
+				t.Fatalf("ForwardGeminiWeb() error = %v", err)
+			}
+			for _, path := range []string{"/app", "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"} {
+				if got := upstream.header(path).Get("cookie"); strings.Contains(got, placeholder) {
+					t.Errorf("cookie at %s = %q, must not carry the router placeholder", path, got)
+				}
+			}
+		})
+	}
+}
+
+// TestGeminiWebKeepsACredentialThatMerelyContainsAPlaceholderWord guards the
+// other direction: the check must drop the exact placeholder and nothing else.
+//
+// A real cookie whose value happens to contain "anonymous" or "public" is a
+// credential, and dropping it would silently turn a signed-in session into an
+// anonymous one — the same class of bug, pointing the other way.
+func TestGeminiWebKeepsACredentialThatMerelyContainsAPlaceholderWord(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	const cookie = "__Secure-1PSID=public-anonymous-session-value"
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		APIKey:   cookie,
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+	if got := upstream.header("/app").Get("cookie"); !strings.Contains(got, cookie) {
+		t.Errorf("cookie = %q, want the configured credential preserved", got)
+	}
+}
+
 // TestGeminiWebReportsAnExpiredSessionAsUnauthorized proves a refused credential
 // surfaces as 401, the one status the router rotates a connection on.
 func TestGeminiWebReportsAnExpiredSessionAsUnauthorized(t *testing.T) {

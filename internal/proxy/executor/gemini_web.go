@@ -103,6 +103,23 @@ func geminiWebRequestedModel(envelope geminiWebRequestEnvelope) string {
 	return model
 }
 
+// geminiWebOnlyModelAdvice explains an unavailable model in terms of the
+// credential the session actually presented.
+//
+// Saying "an anonymous session reaches one model" to a caller whose cookie is
+// configured but expired sends them looking for a cookie they already pasted,
+// and the fix is different: that one has to be replaced, while an anonymous
+// session has to be given one. Naming the wrong cause costs a support round
+// trip, so the advice follows the credential rather than assuming its absence.
+func geminiWebOnlyModelAdvice(cookie string) string {
+	if cookie != "" {
+		return "The configured __Secure-1PSID reaches this one model only — a signed-in tab that can use " +
+			"the others needs the cookie pasted again."
+	}
+	return "An anonymous session reaches one model — configure a __Secure-1PSID cookie from a signed-in tab " +
+		"to reach the others."
+}
+
 // geminiWebSelectModel resolves the registry entry the turn is addressed to.
 //
 // The site answers a model it does not recognize with a different one instead of
@@ -116,9 +133,8 @@ func geminiWebSelectModel(ctx context.Context, session *geminiWebSession, reques
 	model := geminiWebResolveModel(models, requested)
 	if model == nil {
 		return nil, geminiWebFailure(http.StatusBadRequest, fmt.Sprintf(
-			"gemini-web cannot be served %q by this session; it offers %s. "+
-				"An anonymous session reaches one model — configure a __Secure-1PSID cookie from a signed-in tab to reach the others.",
-			requested, geminiWebAvailableModels(models)))
+			"gemini-web cannot be served %q by this session; it offers %s. %s",
+			requested, geminiWebAvailableModels(models), geminiWebOnlyModelAdvice(session.cookie)))
 	}
 	return model, nil
 }
@@ -260,10 +276,13 @@ func (t *geminiWebTurn) verifyIdentity() error {
 	if t.served == "" || t.resolved == nil || t.served == t.resolved.ID {
 		return nil
 	}
+	advice := "An anonymous session reaches one model only."
+	if geminiWebCookieHeader(t.req) != "" {
+		advice = "The configured __Secure-1PSID cannot reach the requested model — the session it produced was served a different one."
+	}
 	return geminiWebFailure(http.StatusBadGateway, fmt.Sprintf(
-		"gemini-web was asked for %q and the session answered with %q — the account cannot reach the requested model. "+
-			"An anonymous session reaches one model only.",
-		t.requested, t.servedLabelOrID()))
+		"gemini-web was asked for %q and the session answered with %q — the account cannot reach the requested model. %s",
+		t.requested, t.servedLabelOrID(), advice))
 }
 
 // servedLabelOrID names the model the site actually used.

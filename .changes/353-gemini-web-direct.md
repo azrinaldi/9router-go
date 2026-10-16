@@ -223,3 +223,29 @@ it that, and the label made a paid-tier-capable provider look like a free tier.
 The card is now "Gemini Web" and the messages say what is true — an anonymous
 session reaches **one model** — without a tier claim that changes under the user's
 feet.
+
+### fix(gemini-web): stop sending the router's placeholder as a cookie
+
+`NoAuth` providers are dispatched with their catalog `DefaultAPIKey`, so the
+executor received the literal word `anonymous` (or `public`) as `req.APIKey` even
+when nobody had configured anything. The cookie renderer treated it as a bare
+`__Secure-1PSID` value and sent `Cookie: __Secure-1PSID=anonymous` to
+`gemini.google.com` on every request — a credential the user never supplied,
+handed to a third party, and one that made the session look credentialed.
+
+Found from a user report, not by a test: a request for `gemini-flash` was refused
+with advice naming a "configured `__Secure-1PSID`" on a connection whose cookie
+field was empty. The visible half was the wrong sentence; the invisible half was
+that Google had been receiving a cookie nobody set.
+
+Two placeholders are now recognised and dropped, matching on the whole value
+rather than a substring — a real cookie whose value merely contains the word
+`anonymous` is a credential to pass through, and dropping it would turn a
+signed-in session anonymous, which is the same bug pointing the other way. Both
+directions are pinned by tests.
+
+The same change makes a refusal name the credential it actually tried, because one
+message cannot be right for both cases: telling someone with a stale cookie that
+"an anonymous session reaches one model" sends them looking for the cookie they
+already pasted, when the fix is to replace it. With no credential the advice says
+how to obtain one; with one configured it says to paste a fresh one.

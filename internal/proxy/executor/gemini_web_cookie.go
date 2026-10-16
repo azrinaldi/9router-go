@@ -17,6 +17,22 @@ func GeminiWebCookieHeader(apiKey string) string {
 // probe does not carry a second copy that drifts.
 func GeminiWebUserAgent() string { return geminiWebUserAgent }
 
+// geminiWebPlaceholderKeys are the values the router substitutes for a provider
+// with no credential configured. They reach the executor as a real APIKey,
+// because `NoAuth` providers are dispatched with their catalog `DefaultAPIKey`
+// — so without this the placeholder is rendered into a cookie and sent to the
+// site as `__Secure-1PSID=anonymous`, which is not a bug the user can see: the
+// session still works, anonymously, and the wording of any refusal then blames
+// a credential that was never configured.
+//
+// The check is deliberately on the whole value rather than a prefix: a real
+// `__Secure-1PSID` never equals one of these, and a cookie that merely contains
+// the word "anonymous" is a credential to pass through, not one to drop.
+var geminiWebPlaceholderKeys = map[string]bool{
+	"anonymous": true,
+	"public":    true,
+}
+
 // geminiWebCookieHeader renders a configured credential as a Cookie header.
 //
 // Three spellings reach here, and all three are in the dashboard's own hint: a
@@ -25,7 +41,7 @@ func GeminiWebUserAgent() string { return geminiWebUserAgent }
 // is the only reading left.
 func geminiWebCookieHeader(req *Request) string {
 	raw := strings.TrimSpace(req.APIKey)
-	if raw == "" {
+	if raw == "" || geminiWebPlaceholderKeys[raw] {
 		return ""
 	}
 	if strings.HasPrefix(raw, "[") || strings.HasPrefix(raw, "{") {
