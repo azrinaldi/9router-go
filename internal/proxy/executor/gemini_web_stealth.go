@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
@@ -42,7 +43,7 @@ var geminiWebTLSProfile = profiles.Chrome_150_PSK
 // read back off it and given to the tls-client. Without that the operator's
 // egress assignment would silently not apply to this provider — the request
 // would leave from the host IP while the dashboard showed it as proxied.
-func newGeminiWebStealthClient(reference *http.Client) (*geminiWebStealthClient, error) {
+func newGeminiWebStealthClient(reference *http.Client, origin, credential string) (*geminiWebStealthClient, error) {
 	options := []tls_client.HttpClientOption{
 		// The client's own overall timeout stays disabled: this provider streams,
 		// and the two clocks that matter — first byte and idle — are enforced by
@@ -69,7 +70,12 @@ func newGeminiWebStealthClient(reference *http.Client) (*geminiWebStealthClient,
 	if err != nil {
 		return nil, fmt.Errorf("gemini-web: build TLS client: %w", err)
 	}
-	return &geminiWebStealthClient{client: client}, nil
+	stack := &geminiWebStealthClient{client: client}
+	// The credential is seeded once, here, and never again: the jar is the one
+	// place a cookie's current value lives. Re-seeding on each call would put the
+	// value the user pasted back over one the site has since rotated.
+	stack.seedCredential(origin, credential)
+	return stack, nil
 }
 
 // geminiWebProxyFrom recovers the proxy a connection was assigned.
@@ -101,8 +107,50 @@ func geminiWebProxyFrom(reference *http.Client) string {
 }
 
 // do issues one request through the stealth stack.
+//
+// The credential is seeded into the jar rather than written as a Cookie header,
+// and the header is stripped before the call. Both halves are needed: fhttp
+// inserts jar cookies with AddCookie, so a hand-written header is not replaced
+// but appended to — one name, two values, the stale one first. The site rotates
+// __Secure-1PSIDTS and treats a stale value as a cancelled session, so the
+// appended duplicate is what turns a signed-in session into an anonymous one
+// without any error to show for it.
+//
+// Seeding on every call keeps the jar's non-rotated entries in step with the
+// configured credential, and lets the rotated ones — which only the jar has —
+// survive.
 func (s *geminiWebStealthClient) do(ctx *fhttp.Request) (*fhttp.Response, error) {
+	// The Cookie header is left empty on purpose: the jar writes the cookie, and
+	// it holds whatever the site last issued. A header written here would be
+	// appended to rather than replaced, sending the name twice.
+	ctx.Header.Del("cookie")
 	return s.client.Do(ctx)
+}
+
+// seedCredential puts the configured credential into the jar for one host.
+func (s *geminiWebStealthClient) seedCredential(origin, credential string) {
+	if strings.TrimSpace(origin) == "" || strings.TrimSpace(credential) == "" {
+		return
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return
+	}
+	cookies := make([]*fhttp.Cookie, 0, 8)
+	for _, part := range strings.Split(credential, ";") {
+		name, value, found := strings.Cut(strings.TrimSpace(part), "=")
+		if !found || strings.TrimSpace(name) == "" {
+			continue
+		}
+		cookies = append(cookies, &fhttp.Cookie{
+			Name:  strings.TrimSpace(name),
+			Value: strings.TrimSpace(value),
+			Path:  "/",
+		})
+	}
+	if len(cookies) > 0 {
+		s.client.SetCookies(u, cookies)
+	}
 }
 
 // closeIdleConnections drops pooled connections whose TLS session may have been

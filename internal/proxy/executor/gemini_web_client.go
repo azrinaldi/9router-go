@@ -145,7 +145,7 @@ func geminiWebSessionFor(req *Request) *geminiWebSession {
 	if session, ok := geminiWebSessions[key]; ok {
 		return session
 	}
-	stealth, err := newGeminiWebStealthClient(req.Client)
+	stealth, err := newGeminiWebStealthClient(req.Client, endpoints.origin, credential)
 	if err != nil {
 		// The client is built per session and can only fail on a bad option, so a
 		// failure here is a programming error rather than an upstream problem.
@@ -245,9 +245,9 @@ func (s *geminiWebSession) do(ctx context.Context, method, target string, body i
 	if contentType != "" {
 		values["content-type"] = contentType
 	}
-	if s.cookie != "" {
-		values["cookie"] = s.cookie
-	}
+	// The cookie is not written here: the jar carries it, including any value the
+	// site has rotated since the credential was configured. Writing it as well
+	// would send the name twice — see geminiWebStealthClient.do.
 	geminiWebSetOrdered(request.Header, geminiWebCORSOrder, values)
 	request.Header[fhttp.PHeaderOrderKey] = geminiWebPseudoHeaderOrder
 	return s.stealth.do(request)

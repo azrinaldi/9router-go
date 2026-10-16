@@ -54,6 +54,10 @@ type geminiWebFakeUpstream struct {
 	streamBody string
 	// streamStatus overrides the HTTP status StreamGenerate answers with.
 	streamStatus int
+	// rotateCookieTS, when set, is sent as a rotated __Secure-1PSIDTS on the
+	// bootstrap page — the shape a live site uses to hand the session a fresh
+	// value for a cookie the caller already presented.
+	rotateCookieTS string
 }
 
 func newGeminiWebFakeUpstream(t *testing.T) *geminiWebFakeUpstream {
@@ -140,6 +144,11 @@ func (f *geminiWebFakeUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request
 			page += `"SNlM0e":"` + f.at + `",`
 		}
 		page += `"Ylro7b":"pctx"}}</script></html>`
+		if f.rotateCookieTS != "" {
+			// No Domain: a cookie jar rejects a Domain that does not match the host
+			// it was served from, and the fake runs on 127.0.0.1.
+			http.SetCookie(w, &http.Cookie{Name: "__Secure-1PSIDTS", Value: f.rotateCookieTS, Path: "/"})
+		}
 		w.Write([]byte(page))
 	default:
 		http.NotFound(w, r)
@@ -508,7 +517,7 @@ func TestGeminiWebUsesChromePseudoHeaderOrder(t *testing.T) {
 // TestGeminiWebUsesTheStealthTLSStack proves the provider dials with the uTLS
 // client rather than net/http, which is the whole point of the dependency.
 func TestGeminiWebUsesTheStealthTLSStack(t *testing.T) {
-	client, err := newGeminiWebStealthClient(nil)
+	client, err := newGeminiWebStealthClient(nil, geminiWebOrigin, "")
 	if err != nil {
 		t.Fatalf("newGeminiWebStealthClient() error = %v", err)
 	}
@@ -732,6 +741,51 @@ func TestGeminiWebKeepsACredentialThatMerelyContainsAPlaceholderWord(t *testing.
 	}
 	if got := upstream.header("/app").Get("cookie"); !strings.Contains(got, cookie) {
 		t.Errorf("cookie = %q, want the configured credential preserved", got)
+	}
+}
+
+// TestGeminiWebSendsOneValuePerCookieAfterRotation proves a rotated cookie does
+// not travel beside the stale value it replaces.
+//
+// The site rotates __Secure-1PSIDTS and returns the new value as Set-Cookie. Go's
+// http.Client (and fhttp's, which this provider dials through) inserts jar cookies
+// with AddCookie, so a Cookie header written by hand ends up carrying the value
+// the caller pasted *and* the rotated one — the same name twice, the stale value
+// first. Google reads a stale __Secure-1PSIDTS as a cancelled session, so the
+// request is judged anonymous: it still succeeds, still returns a model list, and
+// quietly offers one model instead of the account's several.
+func TestGeminiWebSendsOneValuePerCookieAfterRotation(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.rotateCookieTS = "sidts-ROTATED-BY-THE-SITE"
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		APIKey:   "__Secure-1PSIDTS=sidts-PASTED; __Secure-1PSID=psid-value",
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+
+	// The turn is the last call, so its cookie header reflects the rotation the
+	// bootstrap page handed out.
+	got := upstream.header("/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate").Get("cookie")
+	if strings.Count(got, "__Secure-1PSIDTS=") > 1 {
+		t.Errorf("cookie = %q, carries __Secure-1PSIDTS twice: the stale value and the rotated one", got)
+	}
+	if strings.Contains(got, "sidts-PASTED") {
+		t.Errorf("cookie = %q, still carries the stale pasted value after rotation", got)
+	}
+	if !strings.Contains(got, "sidts-ROTATED-BY-THE-SITE") {
+		t.Errorf("cookie = %q, must carry the rotated value the site issued", got)
+	}
+	if !strings.Contains(got, "__Secure-1PSID=psid-value") {
+		t.Errorf("cookie = %q, must keep the cookies the site did not rotate", got)
 	}
 }
 

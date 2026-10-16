@@ -336,13 +336,40 @@ category-first design working as intended — the alternative is refusing a name
 account can in fact serve — but a version literal in a model id is not a promise
 about the version that answers.
 
-**Cookie rotation is not implemented.** Google rotates `SIDCC` and the
-`__Secure-*PSIDCC` family on the calls this provider makes and returns them as
-`Set-Cookie`; the reference implementation rotates `__Secure-1PSIDTS` and `SIDCC`
-explicitly through `RotateCookies` and persists the result. This executor uses a
-cookie jar per session, so within one process lifetime those refreshed values are
-used — a long-running instance rides out a `SIDCC` rotation — but a **restart
-reloads the pasted credential**, and any rotated value is lost. A cookie can
-therefore stop working before its own expiry date, and the remedy at that point is
-to paste a fresh one. Rotation is the next step for this provider, not part of
-this change.
+### fix(gemini-web): stop sending a stale cookie beside its rotated replacement
+
+The site rotates `__Secure-1PSIDTS` and hands the new value back as `Set-Cookie`.
+This provider presented the credential as a hand-written `Cookie` header **and**
+dialled through a client with a cookie jar, and fhttp inserts jar cookies with
+`AddCookie` — it does not replace a header the caller wrote. So after the first
+rotation every request carried the cookie **twice**:
+
+```text
+Cookie: __Secure-1PSIDTS=<the value the user pasted>; …; __Secure-1PSIDTS=<the rotated value>
+```
+
+The stale value came first. Google reads a stale `__Secure-1PSIDTS` as a
+**cancelled session**, so the request was judged anonymous: it still returned
+`200`, still returned a model list, and quietly offered one model instead of the
+account's four. A signed-in user saw Flash-Lite only, with no error naming the
+cookie — and because the failure looks exactly like an anonymous session, the
+refusal message blamed a cookie that was configured correctly.
+
+The fix is that the jar owns the cookie: the credential is seeded into it once,
+when the session is built, and no `Cookie` header is written. Seeding once
+matters — re-seeding per call would put the pasted value back over the rotated
+one, since the jar overwrites by name.
+
+Found by asking why a live Pro cookie stopped working mid-session. It is
+deterministic, so it is pinned: the fake upstream now returns a rotated
+`__Secure-1PSIDTS`, and the test asserts the turn carries that value, carries it
+once, and keeps the cookies the site did not rotate. It was confirmed to fail
+before the fix, with the duplicate visible in the assertion output.
+
+**What is still not implemented.** Rotation is only honoured **within a process
+lifetime**: the jar holds the rotated value, but the value the user pasted is what
+a restart reloads. The reference implementation rotates `__Secure-1PSIDTS` and
+`SIDCC` explicitly through `RotateCookies` and persists the result to disk, so its
+cookie survives a restart; this one needs a fresh paste after a restart, or when
+the site cancels a session for other reasons. Persisting the rotated value is the
+next step for this provider.
