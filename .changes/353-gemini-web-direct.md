@@ -280,23 +280,69 @@ describes rather than passing vacuously.
 ### feat(gemini-web): sign the registry call with SAPISIDHASH
 
 The reference implementation sends `authorization: SAPISIDHASH <seconds>_<sha1>`
-on the `batchexecute` call, and this executor did not. That is the RPC which
-answers *which models may this session use*, so it is the call the site judges the
-caller on. A cookie presented without the signature **can be answered as an
-anonymous visitor** — which returns a model list, keeps every turn working, and
-simply offers fewer models than the account has. Nothing downstream can tell that
-apart from an account that genuinely lacks them, so a signed-in user with a Pro
-subscription would see Flash-Lite only and no error explaining why.
+on the `batchexecute` call, and this executor did not. It is now sent when the
+credential carries a `SAPISID` to sign with.
+
+**What it is not:** a measured requirement. Probing the real endpoint with a
+signed-in cookie showed the signature is **not** what decides the served set — the
+same four models (Flash-Lite, Flash, Pro, Argon) come back with the header and
+without it. The reasoning that produced it was plausible and wrong: that RPC does
+answer *which models may this session use*, so it looked like the call the site
+judges the caller on, but nothing demonstrated that a missing signature changes
+the answer. It is kept because it makes the request match the one the page's own
+JavaScript makes, which is the standard this provider holds itself to — and it is
+written up this way so the next reader does not inherit a claim that was never
+checked.
+
+By contrast the `at` field above **is** a measured requirement: the same probe
+without it answers `400`, and with it `200`.
 
 The signature is `<unix-seconds>_<sha1("<seconds> <SAPISID> <origin>")>`, built
-only when the credential carries a `SAPISID` to sign with. An anonymous session
-has nothing to sign and must send no header at all, because a malformed one is
-worse than none. The cookie lookup matches the **whole** cookie name rather than a
-prefix: `__Secure-1PSID` is a prefix of `__Secure-1PSIDTS`, and signing with the
-wrong value produces a header the site rejects without a diagnostic.
+only when a `SAPISID` is present. An anonymous session has nothing to sign and
+sends no header at all, because a malformed one is worse than none. The cookie
+lookup matches the **whole** cookie name rather than a prefix: `__Secure-1PSID` is
+a prefix of `__Secure-1PSIDTS`, and signing with the wrong value produces a header
+the site rejects without a diagnostic.
 
 **Verified**: three tests pin the signature, the anonymous case, and the
 prefix-collision case. The first recomputes the digest from the request rather
-than trusting the prefix, and was confirmed to fail when the header is dropped, so
-it catches the regression it describes. The anonymous path was re-run end to end
-against the live site after the change.
+than trusting the prefix, and was confirmed to fail when the header is dropped.
+
+### feat(gemini-web): verified end to end against a signed-in Gemini Pro account
+
+Every signed-in claim above was checked against a real account, which is the
+verification this provider had been missing — the anonymous path was the only one
+ever exercised before.
+
+| Check | Result |
+|---|---|
+| `GET /app` with the cookie | `200`, and the page carries **`SNlM0e`** (an anonymous page does not) |
+| Registry `otAQ7b` with the cookie | 4 models: `Flash-Lite`, `Flash` (3.8), `Pro` (3.1), **`Argon` (4 Argon)** |
+| `gemini-web/gemini-argon` through the gateway | `200`, answer returned |
+| `gemini-web/gemini-4-argon` | `200`, answer returned |
+| Streaming with Argon | real deltas, terminated by `data: [DONE]` |
+| Registry without the `at` field | **`400`** — the token is load-bearing |
+| Registry without the signature | `200`, same 4 models — it is not |
+| Credential in logs | absent; the dashboard API returns `apiKeyMasked` only |
+
+**One consequence to know about.** `otAQ7b` names models by *category*, and a
+category is stable across versions: this account's `Flash` entry carries the label
+`3.8 Flash`, while the catalogue also publishes `gemini-3.7-flash`. A request for
+the versioned name resolves to that same entry and is served by it, so the answer
+comes back labelled `gemini-3.7-flash` although `3.8` produced it. The identity
+check compares the registry **id**, which is what the site reports, so it cannot
+see a difference between two catalogue names that point at one entry. That is the
+category-first design working as intended — the alternative is refusing a name the
+account can in fact serve — but a version literal in a model id is not a promise
+about the version that answers.
+
+**Cookie rotation is not implemented.** Google rotates `SIDCC` and the
+`__Secure-*PSIDCC` family on the calls this provider makes and returns them as
+`Set-Cookie`; the reference implementation rotates `__Secure-1PSIDTS` and `SIDCC`
+explicitly through `RotateCookies` and persists the result. This executor uses a
+cookie jar per session, so within one process lifetime those refreshed values are
+used — a long-running instance rides out a `SIDCC` rotation — but a **restart
+reloads the pasted credential**, and any rotated value is lost. A cookie can
+therefore stop working before its own expiry date, and the remedy at that point is
+to paste a fresh one. Rotation is the next step for this provider, not part of
+this change.
