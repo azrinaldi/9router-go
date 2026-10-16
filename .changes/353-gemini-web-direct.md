@@ -276,3 +276,27 @@ surfacing later as a model refusal that blames the model.
 without it — over both RPCs an authenticated session uses. The first was confirmed
 to fail when the token is dropped from the form, so it catches the regression it
 describes rather than passing vacuously.
+
+### feat(gemini-web): sign the registry call with SAPISIDHASH
+
+The reference implementation sends `authorization: SAPISIDHASH <seconds>_<sha1>`
+on the `batchexecute` call, and this executor did not. That is the RPC which
+answers *which models may this session use*, so it is the call the site judges the
+caller on. A cookie presented without the signature **can be answered as an
+anonymous visitor** — which returns a model list, keeps every turn working, and
+simply offers fewer models than the account has. Nothing downstream can tell that
+apart from an account that genuinely lacks them, so a signed-in user with a Pro
+subscription would see Flash-Lite only and no error explaining why.
+
+The signature is `<unix-seconds>_<sha1("<seconds> <SAPISID> <origin>")>`, built
+only when the credential carries a `SAPISID` to sign with. An anonymous session
+has nothing to sign and must send no header at all, because a malformed one is
+worse than none. The cookie lookup matches the **whole** cookie name rather than a
+prefix: `__Secure-1PSID` is a prefix of `__Secure-1PSIDTS`, and signing with the
+wrong value produces a header the site rejects without a diagnostic.
+
+**Verified**: three tests pin the signature, the anonymous case, and the
+prefix-collision case. The first recomputes the digest from the request rather
+than trusting the prefix, and was confirmed to fail when the header is dropped, so
+it catches the regression it describes. The anonymous path was re-run end to end
+against the live site after the change.
