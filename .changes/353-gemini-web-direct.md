@@ -150,7 +150,51 @@ there for an unrelated reason. The loop reads its target list out of the `Makefi
 instead of restating it, so a target added there cannot be forgotten. The same loop
 is referenced from §7.5 (verify) and §8 (cheat-sheet).
 
-**Supersedes****Supersedes** the gemini-web "catalog-only, needs a browser" notes in
+**Supersedes** the gemini-web "catalog-only, needs a browser" notes in
 `internal/proxy/executor/gemini_web.go`, `internal/providers/providers.go`,
 `internal/proxy/executor/init.go`, `internal/handlers/dashboard/validate_web_providers.go`
 and `web/src/lib/providers.ts`.
+
+### feat(gemini-web): catalogue both registry naming forms, including Argon
+
+The catalogue published only the versioned spelling of each model, so the names
+the site's own registry produces could not be requested. The registry names a
+model twice: by **category** — `Pro`, `Flash`, `Argon` — and by a **display label**
+carrying the version — `3.1 Pro`, `4 Argon`. A client written against the site's
+naming asks for `gemini-argon` or `gemini-4-argon`; the catalogue offered neither,
+so a request for Argon was answered "cannot be served by this session" on an
+account that has it. Both forms are now catalogued for every model the registry
+reports, so `gemini-pro` / `gemini-3.1-pro` and `gemini-argon` / `gemini-4-argon`
+each resolve.
+
+**The category form is the one to keep, and the reason is release churn.** A version
+prefix moves with every release — this registry already reports `3.5 Flash-Lite`
+where the catalogue said `3.1` — while the category does not. Listing the category
+name means the model stays reachable across a version bump without an edit here;
+the versioned entries are kept because they are what existing clients send.
+
+**A catalogued name that matches nothing is a trap, so it is tested.** A name added
+to the catalogue without the matcher learning about it reaches the user as
+"cannot be served by this session" even when the account has the model, which reads
+as a broken provider rather than a mislabelled one. One test resolves every
+catalogue entry against the fullest registry the site is known to report, and
+fails when an entry matches nothing.
+
+**Verified**: the new capability rows are `gemini-pro`, `gemini-flash`,
+`gemini-flash-lite`, `gemini-argon`, `gemini-3-pro` and `gemini-4-argon`, each
+carrying the web surface's own capability set (`Tools`, `Reasoning`,
+`gemini-level`, thinking not disablable) rather than falling through to the generic
+`*gemini-3*` pattern row, which would advertise the API surface's vision and search
+flags. The three new executor tests pass, as does the whole `internal/providers`,
+`internal/handlers/dashboard` and `internal/proxy/executor` suite. Argon itself
+cannot be exercised end to end here: it is served to a signed-in account only, and
+an anonymous session reports exactly one model (`Flash-Lite`), which is what the
+live `otAQ7b` probe returned.
+
+**Also removed the word "free" from the provider's name and messages.** The provider
+card read "Gemini Web (Free)", and the refusal text explained that an anonymous
+session reaches "the free model". Neither the plan nor the site's own naming calls
+it that, and the label made a paid-tier-capable provider look like a free tier.
+The card is now "Gemini Web" and the messages say what is true — an anonymous
+session reaches **one model** — without a tier claim that changes under the user's
+feet.

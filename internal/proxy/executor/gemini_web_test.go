@@ -935,3 +935,102 @@ func TestGeminiWebSendsTheDeclaredToolsInThePrompt(t *testing.T) {
 }
 
 var _ = time.Second
+
+// geminiWebFullRegistry is the model set a signed-in account reports: the
+// Flash-Lite an anonymous session is limited to, plus Flash, Pro and Argon.
+func geminiWebFullRegistry() []geminiWebModel {
+	return []geminiWebModel{
+		{ID: "cf41b0e0dd7d53e5", Category: "Flash-Lite", DisplayName: "3.5 Flash-Lite"},
+		{ID: "9d1f8b7e6a5c4321", Category: "Flash", DisplayName: "3.1 Flash"},
+		{ID: "95a4c0abcba24364", Category: "Pro", DisplayName: "3.1 Pro"},
+		{ID: "77b2d1e9f0a34567", Category: "Argon", DisplayName: "4 Argon"},
+	}
+}
+
+// TestGeminiWebResolvesBothRegistryNamingForms proves every name the catalogue
+// publishes reaches the registry entry it names.
+//
+// The site's registry names a model twice: by category — "Pro", "Argon",
+// "Flash-Lite" — and by a display label carrying the version, "3.1 Pro",
+// "4 Argon". A client written against the site's own naming asks for
+// `gemini-4-argon`; one reading this catalogue asks for `gemini-argon`. Both
+// have to land on the same entry, and no form may be matched by a different
+// model's slug: `gemini-pro` picking the Flash-Lite entry would answer a Pro
+// request with the smallest model on offer and report success.
+func TestGeminiWebResolvesBothRegistryNamingForms(t *testing.T) {
+	registry := geminiWebFullRegistry()
+
+	tests := []struct {
+		requested string
+		wantID    string
+	}{
+		{"gemini-argon", "77b2d1e9f0a34567"},
+		{"gemini-4-argon", "77b2d1e9f0a34567"},
+		{"gemini-flash-lite", "cf41b0e0dd7d53e5"},
+		{"gemini-3.5-flash-lite", "cf41b0e0dd7d53e5"},
+		{"gemini-3.1-flash-lite", "cf41b0e0dd7d53e5"},
+		{"gemini-flash", "9d1f8b7e6a5c4321"},
+		{"gemini-3.7-flash", "9d1f8b7e6a5c4321"},
+		{"gemini-pro", "95a4c0abcba24364"},
+		{"gemini-3.1-pro", "95a4c0abcba24364"},
+		{"gemini-3-pro", "95a4c0abcba24364"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requested, func(t *testing.T) {
+			got := geminiWebResolveModel(registry, tt.requested)
+			if got == nil {
+				t.Fatalf("%q is catalogued but resolved to no registry entry", tt.requested)
+			}
+			if got.ID != tt.wantID {
+				t.Errorf("%q resolved to %s (%q), want %q", tt.requested, got.Category, got.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+// TestGeminiWebCatalogueNamesAllResolve stops a catalogued name from being dead
+// on arrival.
+// A name added to the catalogue but never matched by the registry parser reaches
+// the user as "cannot be served by this session" even on an account that has the
+// model — the provider looks broken for that model rather than mislabelled. Every
+// catalogue entry is therefore resolved against the fullest registry the site is
+// known to report, so adding a name without teaching the matcher about it fails
+// here instead of in a user's session.
+func TestGeminiWebCatalogueNamesAllResolve(t *testing.T) {
+	registry := geminiWebFullRegistry()
+
+	catalogued := providers.GetProviderModels("gemini-web")
+	if len(catalogued) == 0 {
+		t.Fatal("gemini-web publishes no models")
+	}
+	for _, name := range catalogued {
+		if geminiWebResolveModel(registry, name) == nil {
+			t.Errorf("catalogued model %q matches no registry entry, so it can never be served", name)
+		}
+	}
+}
+
+// TestGeminiWebArgonCarriesItsThinkingLevel proves the Argon model takes a
+// reasoning level like every other one.
+// The site's enum is not ordered the way the words are — low is 1, medium is 4,
+// high is 2 — so a model wired to the wrong level would look like it answers
+// while quietly doing so at the floor.
+func TestGeminiWebArgonCarriesItsThinkingLevel(t *testing.T) {
+	tests := []struct {
+		effort string
+		want   int
+	}{
+		{"low", 1},
+		{"medium", 4},
+		{"high", 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.effort, func(t *testing.T) {
+			body := geminiWebRequestEnvelope{Model: "gemini-4-argon", ReasoningEffort: tt.effort}
+			if got := geminiWebThinkingLevel(body); got != tt.want {
+				t.Errorf("effort %q mapped to %d, want %d", tt.effort, got, tt.want)
+			}
+		})
+	}
+}

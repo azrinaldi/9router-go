@@ -117,7 +117,7 @@ func geminiWebSelectModel(ctx context.Context, session *geminiWebSession, reques
 	if model == nil {
 		return nil, geminiWebFailure(http.StatusBadRequest, fmt.Sprintf(
 			"gemini-web cannot be served %q by this session; it offers %s. "+
-				"An anonymous session is served the free model only — configure a __Secure-1PSID cookie from a signed-in tab to reach the others.",
+				"An anonymous session reaches one model — configure a __Secure-1PSID cookie from a signed-in tab to reach the others.",
 			requested, geminiWebAvailableModels(models)))
 	}
 	return model, nil
@@ -262,7 +262,7 @@ func (t *geminiWebTurn) verifyIdentity() error {
 	}
 	return geminiWebFailure(http.StatusBadGateway, fmt.Sprintf(
 		"gemini-web was asked for %q and the session answered with %q — the account cannot reach the requested model. "+
-			"An anonymous session is served the free model only.",
+			"An anonymous session reaches one model only.",
 		t.requested, t.servedLabelOrID()))
 }
 

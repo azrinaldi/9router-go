@@ -406,12 +406,12 @@ var KnownProviders = map[string]ProviderConfig{
 	// page's own JavaScript reaches it. This was never an API — but it is an
 	// HTTP surface, and the executor drives it without a browser.
 	//
-	// NoAuth because the site answers an anonymous visitor: the free model is
-	// served with no credential at all. A pasted __Secure-1PSID cookie is
-	// honored when one is configured, and the only thing it buys is the choice
-	// of model — an anonymous session is served one, a signed-in one several.
-	// Requiring a cookie would turn a plug-and-play provider into one that is
-	// not, for no gain.
+	// NoAuth because the site answers an anonymous visitor: one model is served
+	// with no credential at all. A pasted __Secure-1PSID cookie is honored when
+	// one is configured, and the only thing it buys is the choice of model — an
+	// anonymous session is served one, a signed-in one several. Requiring a
+	// cookie would turn a plug-and-play provider into one that is not, for no
+	// gain.
 	"gemini-web": {
 		BaseURL:       "https://gemini.google.com/app",
 		AuthHeader:    "Authorization",

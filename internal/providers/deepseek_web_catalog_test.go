@@ -34,7 +34,15 @@ func TestBrowserLoginProvidersInCatalog(t *testing.T) {
 			id:      "gemini-web",
 			baseURL: "https://gemini.google.com/app",
 			alias:   "gweb",
-			models:  []string{"gemini-3.1-pro", "gemini-3.7-flash", "gemini-3.1-flash-lite"},
+			// Both naming forms the site's registry produces: the category name
+			// (the stable one) and the display form carrying the version. The
+			// served set is decided live per session, so what is pinned here is
+			// only which names resolve, not which succeed.
+			models: []string{
+				"gemini-3.1-pro", "gemini-3.7-flash", "gemini-3.1-flash-lite",
+				"gemini-pro", "gemini-flash", "gemini-flash-lite", "gemini-argon",
+				"gemini-3-pro", "gemini-4-argon",
+			},
 		},
 	}
 

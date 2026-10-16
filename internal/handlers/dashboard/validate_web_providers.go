@@ -144,12 +144,12 @@ func deepSeekEnvelopeHasToken(body []byte) bool {
 // completion — the same constraint the deepseek-web probe is built to.
 //
 // With no cookie there is nothing to check and nothing to complain about: the
-// site serves the free model anonymously, which is why the executor does not
+// site answers an anonymous visitor, which is why the executor does not
 // require a credential at all.
 func validateGeminiWeb(ctx context.Context, apiKey string) validateOutcome {
 	if strings.TrimSpace(apiKey) == "" {
 		return validateOutcome{valid: true, supported: true,
-			message: "No cookie configured — gemini-web still works, an anonymous session is served the free model. " +
+			message: "No cookie configured — gemini-web still works, an anonymous session reaches one model. " +
 				"Paste __Secure-1PSID from a signed-in gemini.google.com tab to reach the others."}
 	}
 
