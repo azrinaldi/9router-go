@@ -28,6 +28,11 @@ var (
 	// requested, which is the whole reason there is no separate auth call.
 	geminiWebBlRe   = regexp.MustCompile(`"cfb2h":"([^"]+)"`)
 	geminiWebFSidRe = regexp.MustCompile(`"FdrFJe":"([^"]+)"`)
+	// geminiWebAtRe is the anti-CSRF token the site posts as the `at` form
+	// field. A signed-in page carries it; an anonymous one does not, which is
+	// why it is read opportunistically rather than required — see
+	// geminiWebTokens for what its absence means.
+	geminiWebAtRe = regexp.MustCompile(`"SNlM0e":"([^"]+)"`)
 )
 
 // Gemini Web answers an anonymous visitor: `gemini.google.com/app` issues the
@@ -119,9 +124,11 @@ type geminiWebSession struct {
 	stealth *geminiWebStealthClient
 	cookie  string
 	mu      sync.RWMutex
-	bl      string
-	fSid    string
+	page    geminiWebTokens
 	fetched time.Time
+	// warnedNoAt keeps the "cookie produced no SNlM0e" warning to once per
+	// session, since every turn would otherwise repeat it.
+	warnedNoAt bool
 }
 
 // geminiWebSessionFor returns the session a turn with this credential uses.
@@ -151,20 +158,33 @@ func geminiWebSessionFor(req *Request) *geminiWebSession {
 	return session
 }
 
+// geminiWebTokens are the per-page tokens every later call echoes back.
+type geminiWebTokens struct {
+	// bl and fSid are required: without them a call cannot be formed at all.
+	bl   string
+	fSid string
+	// at is the anti-CSRF token posted as the `at` form field. The site issues
+	// it to a signed-in page and omits it for an anonymous visitor, so it is
+	// optional — but when a cookie is configured and this is still empty the
+	// cookie bought nothing, which is worth reporting rather than silently
+	// sending anonymous-shaped requests.
+	at string
+}
+
 // tokens returns the cached page tokens, fetching them when they are absent or
 // old enough that the site may have rotated them.
-func (s *geminiWebSession) tokens(ctx context.Context) (string, string, error) {
+func (s *geminiWebSession) tokens(ctx context.Context) (geminiWebTokens, error) {
 	s.mu.RLock()
-	bl, fSid, fetched := s.bl, s.fSid, s.fetched
+	page, fetched := s.page, s.fetched
 	s.mu.RUnlock()
-	if bl != "" && fSid != "" && time.Since(fetched) < 20*time.Minute {
-		return bl, fSid, nil
+	if page.bl != "" && page.fSid != "" && time.Since(fetched) < 20*time.Minute {
+		return page, nil
 	}
 	return s.refreshTokens(ctx)
 }
 
 // refreshTokens re-reads the page that carries the session tokens.
-func (s *geminiWebSession) refreshTokens(ctx context.Context) (string, string, error) {
+func (s *geminiWebSession) refreshTokens(ctx context.Context) (geminiWebTokens, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -172,29 +192,33 @@ func (s *geminiWebSession) refreshTokens(ctx context.Context) (string, string, e
 	defer cancel()
 	request, err := fhttp.NewRequestWithContext(requestCtx, http.MethodGet, s.endpoints.app, nil)
 	if err != nil {
-		return "", "", fmt.Errorf("gemini-web: build bootstrap request: %w", err)
+		return geminiWebTokens{}, fmt.Errorf("gemini-web: build bootstrap request: %w", err)
 	}
 	geminiWebSetOrdered(request.Header, geminiWebNavigationOrder,
 		geminiWebNavigationValues(s.endpoints.origin, s.cookie))
 	response, err := s.stealth.do(request)
 	if err != nil {
-		return "", "", fmt.Errorf("gemini-web: fetch %s: %w", s.endpoints.app, err)
+		return geminiWebTokens{}, fmt.Errorf("gemini-web: fetch %s: %w", s.endpoints.app, err)
 	}
 	defer response.Body.Close()
 	// The page is ~800 KB of inline script; the tokens are read out of it rather
 	// than the whole body being buffered.
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
-		return "", "", fmt.Errorf("gemini-web: read %s: %w", s.endpoints.app, err)
+		return geminiWebTokens{}, fmt.Errorf("gemini-web: read %s: %w", s.endpoints.app, err)
 	}
 	html := string(body)
 	bl := geminiWebBlRe.FindStringSubmatch(html)
 	fSid := geminiWebFSidRe.FindStringSubmatch(html)
 	if len(bl) < 2 || len(fSid) < 2 || bl[1] == "" || fSid[1] == "" {
-		return "", "", fmt.Errorf("gemini-web: %s did not carry session tokens (HTTP %d)", s.endpoints.app, response.StatusCode)
+		return geminiWebTokens{}, fmt.Errorf("gemini-web: %s did not carry session tokens (HTTP %d)", s.endpoints.app, response.StatusCode)
 	}
-	s.bl, s.fSid, s.fetched = bl[1], fSid[1], time.Now()
-	return s.bl, s.fSid, nil
+	tokens := geminiWebTokens{bl: bl[1], fSid: fSid[1]}
+	if at := geminiWebAtRe.FindStringSubmatch(html); len(at) >= 2 {
+		tokens.at = at[1]
+	}
+	s.page, s.fetched = tokens, time.Now()
+	return tokens, nil
 }
 
 // invalidateTokens drops the cached page tokens so the next call re-reads them.
@@ -229,6 +253,22 @@ func (s *geminiWebSession) do(ctx context.Context, method, target string, body i
 	return s.stealth.do(request)
 }
 
+// geminiWebFormBody renders the urlencoded form both RPCs post, carrying the
+// `at` token when the session has one.
+//
+// `at` is the anti-CSRF value the page's own JavaScript posts alongside `f.req`.
+// The site issues it to a signed-in page and omits it for an anonymous visitor,
+// and both cases work — but a signed-in page's request without it is not the
+// request that page makes, so a session that has one sends it.
+func geminiWebFormBody(at, freq string) string {
+	body := url.Values{}
+	if at != "" {
+		body.Set("at", at)
+	}
+	body.Set("f.req", freq)
+	return body.Encode()
+}
+
 // streamTurn runs one turn and hands every parsed line to onLine, in order.
 func (s *geminiWebSession) streamTurn(
 	ctx context.Context,
@@ -237,9 +277,18 @@ func (s *geminiWebSession) streamTurn(
 	model *geminiWebModel,
 	onLine func(*geminiWebLine) error,
 ) error {
-	bl, fSid, err := s.tokens(ctx)
+	tokens, err := s.tokens(ctx)
 	if err != nil {
 		return err
+	}
+	// A configured cookie that produced no `at` is a cookie the site did not
+	// accept: the page it served was the visitor's, so the request would go out
+	// anonymous and the model the user asked for would be refused as unserved.
+	// Reported here rather than left to surface as a confusing model refusal.
+	if tokens.at == "" && s.cookie != "" && !s.warnedNoAt {
+		s.warnedNoAt = true
+		log.Warn("gemini-web", "the configured cookie produced no SNlM0e token; the site served an anonymous page",
+			"hint", "the cookie is likely stale or missing __Secure-1PSID")
 	}
 	inner := geminiWebBuildInner(prompt, thinkingLevel)
 	uuid := geminiWebRequestUUID()
@@ -257,8 +306,8 @@ func (s *geminiWebSession) streamTurn(
 	query.Set("hl", "en")
 	query.Set("_reqid", geminiWebRequestID())
 	query.Set("rt", "c")
-	query.Set("bl", bl)
-	query.Set("f.sid", fSid)
+	query.Set("bl", tokens.bl)
+	query.Set("f.sid", tokens.fSid)
 
 	headers := map[string]string{
 		"x-goog-ext-525005358-jspb": fmt.Sprintf("[%q,1]", uuid),
@@ -266,14 +315,14 @@ func (s *geminiWebSession) streamTurn(
 		"x-goog-ext-73010990-jspb":  "[0,0,0]",
 	}
 	if model != nil {
-		if header := geminiWebBuildModelHeader(*model, thinkingLevel, fSid); header != "" {
+		if header := geminiWebBuildModelHeader(*model, thinkingLevel, tokens.fSid); header != "" {
 			headers["x-goog-ext-525001261-jspb"] = header
 		}
 	}
 
 	response, err := s.do(ctx, http.MethodPost,
 		s.endpoints.stream+"?"+query.Encode(),
-		strings.NewReader("f.req="+url.QueryEscape(string(form))),
+		strings.NewReader(geminiWebFormBody(tokens.at, string(form))),
 		"application/x-www-form-urlencoded;charset=utf-8", headers)
 	if err != nil {
 		return fmt.Errorf("gemini-web: stream turn: %w", err)

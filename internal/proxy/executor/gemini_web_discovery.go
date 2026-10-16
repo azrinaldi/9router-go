@@ -24,7 +24,7 @@ import (
 // wrb.fr envelope — the RPC id is asserted by the caller through the payload
 // shape it then has to parse.
 func (s *geminiWebSession) batchPayload(ctx context.Context, rpcID, payload string) (any, error) {
-	bl, fSid, err := s.tokens(ctx)
+	tokens, err := s.tokens(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -37,14 +37,14 @@ func (s *geminiWebSession) batchPayload(ctx context.Context, rpcID, payload stri
 	query.Set("source-path", "/app")
 	query.Set("hl", "en")
 	query.Set("rt", "c")
-	query.Set("bl", bl)
-	query.Set("f.sid", fSid)
+	query.Set("bl", tokens.bl)
+	query.Set("f.sid", tokens.fSid)
 
 	requestCtx, cancel := context.WithTimeout(ctx, geminiWebRPCTimeout)
 	defer cancel()
 	response, err := s.do(requestCtx, http.MethodPost,
 		s.endpoints.batch+"?"+query.Encode(),
-		strings.NewReader("f.req="+url.QueryEscape(string(body))),
+		strings.NewReader(geminiWebFormBody(tokens.at, string(body))),
 		"application/x-www-form-urlencoded;charset=UTF-8", nil)
 	if err != nil {
 		return nil, fmt.Errorf("gemini-web: call %s: %w", rpcID, err)

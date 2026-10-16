@@ -40,7 +40,10 @@ type geminiWebFakeUpstream struct {
 	// omits them, which is how a session the site will not establish is tested.
 	bl   string
 	fSid string
-
+	// at is the SNlM0e anti-CSRF token. Empty is what an anonymous page carries:
+	// the site issues it to a signed-in session only, so leaving it empty models
+	// the anonymous case and setting it models a signed-in one.
+	at string
 	// registryBody is the otAQ7b answer. Empty means the default two-model list.
 	registryBody string
 	// registryStatus overrides the HTTP status the registry answers with.
@@ -130,6 +133,9 @@ func (f *geminiWebFakeUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 		if f.fSid != "" {
 			page += `"FdrFJe":"` + f.fSid + `",`
+		}
+		if f.at != "" {
+			page += `"SNlM0e":"` + f.at + `",`
 		}
 		page += `"Ylro7b":"pctx"}}</script></html>`
 		w.Write([]byte(page))
@@ -724,6 +730,77 @@ func TestGeminiWebKeepsACredentialThatMerelyContainsAPlaceholderWord(t *testing.
 	}
 	if got := upstream.header("/app").Get("cookie"); !strings.Contains(got, cookie) {
 		t.Errorf("cookie = %q, want the configured credential preserved", got)
+	}
+}
+
+// TestGeminiWebPostsTheAntiCSRFTokenOfASignedInPage pins the `at` form field.
+//
+// The site's own JavaScript posts SNlM0e as `at` alongside `f.req`, and the
+// reference implementation treats its absence on a signed-in page as an expired
+// session. A session that has the token must therefore send it: the request a
+// signed-in page makes is not the request an anonymous one makes, and sending
+// the anonymous shape with a signed-in cookie is a mismatch between the
+// credential and the call.
+func TestGeminiWebPostsTheAntiCSRFTokenOfASignedInPage(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.at = "AOExyz-signed-in-token"
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		APIKey:   "__Secure-1PSID=signed-in-cookie",
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+
+	for _, path := range []string{
+		"/_/BardChatUi/data/batchexecute",
+		"/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate",
+	} {
+		form, unescapeErr := url.QueryUnescape(upstream.body(path))
+		if unescapeErr != nil {
+			t.Fatalf("%s body is not a urlencoded form: %v", path, unescapeErr)
+		}
+		if !strings.Contains(form, "at="+upstream.at) {
+			t.Errorf("%s body = %q, want the SNlM0e token posted as at", path, form)
+		}
+		// The value carries characters that must survive encoding: the site
+		// answers a mis-encoded `at` with 400 rather than a readable error.
+		if !strings.Contains(form, "f.req=") {
+			t.Errorf("%s body = %q, want f.req alongside at", path, form)
+		}
+	}
+}
+
+// TestGeminiWebOmitsAtForAnAnonymousSession is the other half: an anonymous page
+// carries no SNlM0e, so the request must not invent one.
+func TestGeminiWebOmitsAtForAnAnonymousSession(t *testing.T) {
+	upstream := newGeminiWebFakeUpstream(t)
+	upstream.streamBody = geminiWebStreamFixture("ok")
+	server := withGeminiWebUpstream(t, upstream)
+
+	rec := httptest.NewRecorder()
+	err := ForwardGeminiWeb(rec, &Request{
+		Ctx:      context.Background(),
+		Config:   geminiWebTestConfig(server),
+		Body:     geminiWebTestBody(t, "gemini-3.1-flash-lite", "hi", nil),
+		IsStream: true,
+	})
+	if err != nil {
+		t.Fatalf("ForwardGeminiWeb() error = %v", err)
+	}
+	form, unescapeErr := url.QueryUnescape(upstream.body("/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"))
+	if unescapeErr != nil {
+		t.Fatalf("turn body is not a urlencoded form: %v", unescapeErr)
+	}
+	if strings.Contains(form, "at=") {
+		t.Errorf("anonymous turn body = %q, must not carry an at token", form)
 	}
 }
 
