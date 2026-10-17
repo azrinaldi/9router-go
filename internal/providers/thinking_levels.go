@@ -70,6 +70,11 @@ type thinkingPattern struct {
 // patternThinking is ordered; the first match wins
 // (thinkingLevels.js:38).
 var patternThinking = []thinkingPattern{
+	// Gemini 4 (Argon) rejects "minimal" with 400 — LOW is the floor, and
+	// thinking cannot be disabled. Upstream carries the same override
+	// (thinkingLevels.js:44).
+	{Pattern: "*gemini*argon*", Levels: []string{"low", "medium", "high"}},
+	{Pattern: "*gemini-4*", Levels: []string{"low", "medium", "high"}},
 	{Pattern: "*claude*4.6*", Levels: levelClaudeNoXHigh},
 	{Pattern: "*claude*4-6*", Levels: levelClaudeNoXHigh},
 	{Provider: "codex", Pattern: "*gpt-6*", Levels: codexGPT56Levels()},
