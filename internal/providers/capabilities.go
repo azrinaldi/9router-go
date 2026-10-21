@@ -823,6 +823,12 @@ func GetCapabilitiesForModel(provider, model string) Capabilities {
 		if dynamic.VideoInput {
 			res.VideoInput = true
 		}
+		// The catalog states which models think. Without this a model whose id
+		// matches no pattern rule is published as text-only and a client
+		// offers no thinking control for a model that does think.
+		if dynamic.Reasoning {
+			res.Reasoning = true
+		}
 	}
 
 	// 6. Custom model caps (from kv customModels) — additive, like dynamic,
@@ -923,21 +929,27 @@ func mergeCapabilities(base, overlay Capabilities) Capabilities {
 // audioInput, videoInput, imageOutput, audioOutput, search, tools, reasoning,
 // thinkingFormat, thinkingCanDisable, thinkingRange, contextWindow, maxOutput).
 type CapabilitiesDetail struct {
-	Vision                  bool    `json:"vision"`
-	PDF                     bool    `json:"pdf"`
-	AudioInput              bool    `json:"audioInput"`
-	VideoInput              bool    `json:"videoInput"`
-	ImageOutput             bool    `json:"imageOutput"`
-	AudioOutput             bool    `json:"audioOutput"`
-	Search                  bool    `json:"search"`
-	Tools                   bool    `json:"tools"`
-	Reasoning               bool    `json:"reasoning"`
-	ThinkingFormat          *string `json:"thinkingFormat"`
-	ThinkingCanDisable      bool    `json:"thinkingCanDisable"`
-	ThinkingRange           any     `json:"thinkingRange"`
-	ThinkingEffortSupported bool    `json:"thinkingEffortSupported"`
-	ContextWindow           int     `json:"contextWindow,omitempty"`
-	MaxOutput               int     `json:"maxOutput,omitempty"`
+	Vision                  bool     `json:"vision"`
+	PDF                     bool     `json:"pdf"`
+	AudioInput              bool     `json:"audioInput"`
+	VideoInput              bool     `json:"videoInput"`
+	ImageOutput             bool     `json:"imageOutput"`
+	AudioOutput             bool     `json:"audioOutput"`
+	Search                  bool     `json:"search"`
+	Tools                   bool     `json:"tools"`
+	Reasoning               bool     `json:"reasoning"`
+	ThinkingFormat          *string  `json:"thinkingFormat"`
+	ThinkingCanDisable      bool     `json:"thinkingCanDisable"`
+	ThinkingRange           any      `json:"thinkingRange"`
+	ThinkingEffortSupported bool     `json:"thinkingEffortSupported"`
+	// ThinkingLevels is the list of thinking-effort levels this model
+	// accepts. A client cannot derive it: the same model name can accept
+	// different sets on different gateways, and the only authoritative
+	// statement is the catalog's own list. Without it a client either hides
+	// a level the model supports or offers one it rejects with a 400.
+	ThinkingLevels []string `json:"thinkingLevels,omitempty"`
+	ContextWindow  int      `json:"contextWindow,omitempty"`
+	MaxOutput      int      `json:"maxOutput,omitempty"`
 }
 
 // ComboCapabilities is the aggregated block upstream publishes for a combo
@@ -1086,6 +1098,7 @@ func GetCapabilitiesDetailForModel(provider, model string) CapabilitiesDetail {
 		ThinkingCanDisable:      canDisableThinking(caps),
 		ThinkingRange:           thinkingRange,
 		ThinkingEffortSupported: caps.ThinkingEffortSupported,
+		ThinkingLevels:          GetThinkingLevels(provider, model),
 		ContextWindow:           cw,
 		MaxOutput:               maxOut,
 	}

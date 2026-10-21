@@ -28,12 +28,22 @@ type SyncedModelModalities struct {
 	PDF        bool `json:"pdf"`
 	AudioInput bool `json:"audioInput"`
 	VideoInput bool `json:"videoInput"`
+	// Reasoning is the catalog's statement that the model thinks. Without it
+	// a reasoning model whose id matches no pattern rule is published as
+	// text-only, and a client then offers no thinking control at all.
+	Reasoning bool `json:"reasoning"`
 }
 
 // SyncedModelLimits holds token limits for a provider/model pair.
 type SyncedModelLimits struct {
 	ContextWindow int `json:"contextWindow,omitempty"`
 	MaxOutput     int `json:"maxOutput,omitempty"`
+	// ReasoningLevels is the catalog's own list of accepted thinking-effort
+	// levels (models.dev `reasoning_options[].values`). It is the only
+	// authoritative source for which effort values a model actually takes:
+	// the hand-written pattern table guesses, and a guess either hides a
+	// level the model supports or offers one it rejects with a 400.
+	ReasoningLevels []string `json:"reasoningLevels,omitempty"`
 }
 
 // SyncedCatalog represents the processed catalog file written to disk / kept in
@@ -111,6 +121,11 @@ var ProviderAliases = map[string]string{
 	// zen/* model missed the catalog and fell through to the substring table
 	// (128000/4096) even though the catalog carries the real window.
 	"openai-compatible-chat-opencode-free-bridge": "opencode",
+	// The published alias of that node. A model list renders the node under
+	// its prefix ("zen/minimax-m3.1-flash-free"), and the levels and limits
+	// for that id are looked up by the prefix, so the mapping has to cover
+	// it too — otherwise the alias resolves to nothing.
+	"zen": "opencode",
 }
 
 // GetCatalogState returns the current synchronization state.
@@ -237,6 +252,55 @@ func GetCatalogLimits(provider, model string) (contextWindow, maxOutput int) {
 	return 0, 0
 }
 
+// GetCatalogThinkingLevels looks up the catalog's declared thinking-effort
+// levels for a provider/model pair (models.dev `reasoning_options[].values`).
+//
+// The level set is a property of the model, not of a pattern table: a model
+// that accepts low|medium|high|xhigh|max must not be offered "none" (it
+// rejects it), and a model that only accepts low|high|max must not be offered
+// the levels in between (they are silently clamped or rejected). The catalog
+// states the exact set, so it wins over every inferred table.
+//
+// Returns nil when the catalog does not describe the model's levels.
+func GetCatalogThinkingLevels(provider, model string) []string {
+	if model == "" {
+		return nil
+	}
+	base := strings.ToLower(model)
+	if idx := strings.Index(base, ":"); idx != -1 {
+		base = base[:idx]
+	}
+	candidates := []string{base}
+	if idx := strings.Index(base, "/"); idx != -1 {
+		candidates = append(candidates, base[idx+1:])
+	}
+	if idx := strings.LastIndex(base, "/"); idx != -1 && base[idx+1:] != candidates[len(candidates)-1] {
+		candidates = append(candidates, base[idx+1:])
+	}
+
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	if globalCatalog == nil || globalCatalog.Providers == nil {
+		return nil
+	}
+	keys := []string{strings.ToLower(provider)}
+	if mapped, ok := ProviderAliases[strings.ToLower(provider)]; ok {
+		keys = append(keys, mapped)
+	}
+	for _, key := range keys {
+		byModel, ok := globalCatalog.Providers[key]
+		if !ok {
+			continue
+		}
+		for _, candidate := range candidates {
+			if entry, found := byModel[candidate]; found && len(entry.ReasoningLevels) > 0 {
+				return append([]string(nil), entry.ReasoningLevels...)
+			}
+		}
+	}
+	return nil
+}
+
 // LoadCatalogFromFile loads cached catalog from disk if it exists.
 func LoadCatalogFromFile(filePath string) error {
 	if filePath == "" {
@@ -335,6 +399,17 @@ func SyncModelCatalog(ctx context.Context, client *http.Client, filePath string)
 				Context int `json:"context"`
 				Output  int `json:"output"`
 			} `json:"limit"`
+			// reasoning_options declares which thinking-effort levels the model
+			// accepts: `[{"type":"effort","values":["low","medium","high"]}]`.
+			// A model with no options either does not reason or takes a single
+			// unnamed effort, so the absence of a list is meaningful and must
+			// not be confused with an empty one.
+			ReasoningOptions []struct {
+				Type   string   `json:"type"`
+				Values []string `json:"values"`
+			} `json:"reasoning_options"`
+			// Reasoning is the catalog's statement that the model thinks.
+			Reasoning bool `json:"reasoning"`
 		} `json:"models"`
 	}
 
@@ -376,6 +451,7 @@ func SyncModelCatalog(ctx context.Context, client *http.Client, filePath string)
 					declared.VideoInput = true
 				}
 			}
+			declared.Reasoning = mData.Reasoning
 			if declared != (SyncedModelModalities{}) {
 				for _, key := range catalogProviderKeys(provID) {
 					modelsMap[key+":"+base] = declared
@@ -384,13 +460,34 @@ func SyncModelCatalog(ctx context.Context, client *http.Client, filePath string)
 
 			// Limits belong to the gateway — each truncates differently — so they
 			// stay keyed by provider + model.
-			if mData.Limit != nil && (mData.Limit.Context > 0 || mData.Limit.Output > 0) {
+			//
+			// The effort levels are filed alongside: they are a property of the
+			// same provider+model row, and a row that carries limits but not
+			// levels is exactly the case that leaves the picker guessing.
+			var levels []string
+			for _, opt := range mData.ReasoningOptions {
+				if opt.Type != "" && opt.Type != "effort" {
+					continue
+				}
+				for _, v := range opt.Values {
+					if v != "" {
+						levels = append(levels, v)
+					}
+				}
+			}
+			var contextWindow, maxOutput int
+			if mData.Limit != nil {
+				contextWindow = mData.Limit.Context
+				maxOutput = mData.Limit.Output
+			}
+			if contextWindow > 0 || maxOutput > 0 || len(levels) > 0 {
 				if providersMap[provID] == nil {
 					providersMap[provID] = make(map[string]SyncedModelLimits)
 				}
 				providersMap[provID][base] = SyncedModelLimits{
-					ContextWindow: mData.Limit.Context,
-					MaxOutput:     mData.Limit.Output,
+					ContextWindow:  contextWindow,
+					MaxOutput:      maxOutput,
+					ReasoningLevels: levels,
 				}
 			}
 		}

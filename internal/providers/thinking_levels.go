@@ -169,9 +169,18 @@ func GetThinkingLevels(provider, model string) []string {
 		return nil
 	}
 
-	// A registry-declared per-model set wins over everything, then the pattern
-	// table, then the wire format's default — the order upstream resolves in.
+	// A registry-declared per-model set wins over everything, then the
+	// catalog's own declared levels, then the pattern table, then the wire
+	// format's default — the order upstream resolves in.
+	//
+	// The catalog comes before the pattern table on purpose: it is the only
+	// source that states which effort values a model actually accepts. The
+	// pattern table is a guess from the model name, and a wrong guess either
+	// hides a level the model supports or offers one it rejects with a 400.
 	levels := codexModelLevels(provider, model)
+	if levels == nil {
+		levels = GetCatalogThinkingLevels(provider, model)
+	}
 	if levels == nil {
 		levels = formatLevels[caps.ThinkingFormat]
 		if levels == nil {

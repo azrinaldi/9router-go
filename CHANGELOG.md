@@ -1,5 +1,58 @@
 # Changelog
 
+## [v1.9.15-exp.1] - 2026-10-21
+
+### The catalog's thinking-effort levels reach the client
+
+A model's thinking-effort levels are a property of the model, and the catalog
+states them exactly (`reasoning_options[].values` in models.dev). The gateway
+was inferring them from a hand-written pattern table keyed on the model name,
+so a model that accepts `low|medium|high|xhigh|max` was published as a
+two-value on/off set, and the client offered no thinking control at all for a
+model that does think.
+
+- **Catalog sync** (`catalog_sync.go`): `SyncedModelLimits` carries
+  `ReasoningLevels`, and the sync parses `reasoning_options` into it. The
+  catalog's `reasoning` flag is now also synced (`SyncedModelModalities.
+  Reasoning`) — previously only modalities crossed the boundary, so a
+  reasoning model whose id matched no pattern rule was published as
+  text-only.
+- **Lookup** (`catalog_sync.go`): `GetCatalogThinkingLevels` resolves a
+  provider/model pair to its declared levels, mapping the provider through
+  `ProviderAliases` first. The `zen` prefix (the published alias of the
+  OpenCode free-tier node) is now mapped to `opencode`, so the alias resolves
+  the same row the node id does.
+- **Resolver** (`thinking_levels.go`): `GetThinkingLevels` prefers the
+  catalog's declared set over the pattern table. A registry-declared per-model
+  set (Codex) still wins over everything.
+- **Published** (`capabilities.go`): `/v1/models` capabilities carry
+  `thinkingLevels`, so a client can learn the levels from the model list
+  instead of probing the model.
+
+Two models on the OpenCode free tier publish no level set of their own
+(`mimo-v2.6-flash-free`, `nemotron-3-ultra-free`,
+`nemotron-3.5-lightning-free`); they keep the pattern table's set, which the
+live upstream accepts.
+
+### The OpenCode free bridge publishes what its catalog knows
+
+The bridge (`/root/.opencode-free-bridge`) read OpenCode's catalog, which
+states each model's reasoning flag, effort levels, modalities, and limits, and
+then published only `{id, object, owned_by}` from `/v1/models`. Everything it
+knew was discarded, so the gateway had nothing authoritative to relay.
+
+The bridge now publishes the catalog row as `capabilities` (with
+`reasoning_options`), plus `context_length` and `max_completion_tokens`. The
+id triple is unchanged; the new fields are additive.
+
+Verified against the live bridge on petafora, then against the live gateway:
+`zen/minimax-m3.1-flash-free` publishes
+`low,medium,high,xhigh,max`, matching the levels the upstream accepts (a
+bogus level is rejected with `allowed: low, medium, high, xhigh, max`), and
+`reasoning_effort` reaches the upstream unchanged.
+
+---
+
 ## [v1.9.13] - 2026-10-15
 
 ### OpenCode: append the exact fingerprint even when caller tools collide
