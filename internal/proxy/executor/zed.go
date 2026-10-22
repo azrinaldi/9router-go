@@ -617,7 +617,7 @@ func ForwardZed(w http.ResponseWriter, req *Request) error {
 			if rerr != nil {
 				return fmt.Errorf("read zed response: %w", rerr)
 			}
-			if !proxy.LooksLikeSSE(data) {
+			if !proxy.LooksLikeSSE(data) && !zedLooksLikeJSONL(data) {
 				return zedWriteWhole(w, req, wire, data)
 			}
 			streamBody = io.NopCloser(bytes.NewReader(data))
@@ -635,17 +635,27 @@ func ForwardZed(w http.ResponseWriter, req *Request) error {
 }
 
 // zedPipeStream hands a live upstream stream to the translator for the wire
-// dialect: Anthropic SSE to the Claude bridge, Responses SSE to the Codex one.
+// dialect: Anthropic events to the Claude bridge, Responses events to the
+// Codex one.
+//
+// Zed frames its stream as JSON Lines, so the events are re-framed as SSE
+// before they reach a bridge that only speaks SSE.
 func zedPipeStream(w http.ResponseWriter, req *Request, wire ZedWireModel, upstream io.Reader) error {
+	framed := zedJSONLToSSE(upstream)
 	if wire.Provider == "anthropic" {
-		return handleClaudeMessagesStream(w, req, upstream)
+		return handleClaudeMessagesStream(w, req, framed)
 	}
-	return handleCodexStream(w, req, upstream)
+	return handleCodexStream(w, req, framed)
 }
 
 // zedWriteWhole answers from a complete upstream body, which may be a JSON
-// document or a whole SSE stream (Zed streams even for a non-streaming ask).
+// document or a whole stream (Zed streams even for a non-streaming ask).
 func zedWriteWhole(w http.ResponseWriter, req *Request, wire ZedWireModel, data []byte) error {
+	if zedLooksLikeJSONL(data) {
+		// JSON Lines: re-frame as SSE, then fold it into the single document
+		// a non-streaming client expects.
+		data = readAllFramed(data)
+	}
 	if wire.Provider == "anthropic" {
 		if !proxy.LooksLikeSSE(data) {
 			return handleClaudeMessagesNonStream(w, req, bytes.NewReader(data))
