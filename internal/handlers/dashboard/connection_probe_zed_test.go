@@ -74,12 +74,6 @@ func TestProbeZedWalksBothAuthLayers(t *testing.T) {
 	if !out.valid {
 		t.Fatalf("probe failed: %s", out.message)
 	}
-	if !strings.Contains(out.message, "azrinaldi") {
-		t.Errorf("message does not name the account: %q", out.message)
-	}
-	if !strings.Contains(out.message, "1 models") {
-		t.Errorf("message does not report the catalogue: %q", out.message)
-	}
 	// The account call must carry the blob verbatim — extracting the inner
 	// "token" field is what Zed rejects.
 	if len(z.seenAuth) == 0 {

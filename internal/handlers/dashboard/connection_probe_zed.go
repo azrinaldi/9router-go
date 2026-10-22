@@ -12,7 +12,6 @@ package dashboard
 
 import (
 	"context"
-	json "encoding/json/v2"
 	"fmt"
 	"net/http"
 	"time"
@@ -79,43 +78,11 @@ func (h *DashboardHandler) probeZed(ctx context.Context, data connectionProbeDat
 	if usable == 0 {
 		return probeOutcome{message: "Zed returned no usable models — check the subscription"}
 	}
-	return probeOutcome{
-		valid:   true,
-		message: fmt.Sprintf("Connected as %s — %d models available", zedProbeLogin(body), usable),
-	}
-}
-
-// zedProbeLogin pulls the account handle out of the users/me payload so the
-// test result names the account it authenticated as.
-func zedProbeLogin(body []byte) string {
-	var payload struct {
-		User struct {
-			GitHubLogin string `json:"github_login"`
-			Username    string `json:"username"`
-			ID          any    `json:"id"`
-		} `json:"user"`
-		GitHubLogin string `json:"github_login"`
-		Username    string `json:"username"`
-		ID          any    `json:"id"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "account"
-	}
-	for _, candidate := range []string{
-		payload.User.GitHubLogin, payload.User.Username,
-		payload.GitHubLogin, payload.Username,
-	} {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	if payload.User.ID != nil {
-		return fmt.Sprint(payload.User.ID)
-	}
-	if payload.ID != nil {
-		return fmt.Sprint(payload.ID)
-	}
-	return "account"
+	// Upstream only surfaces `error` on a failed test, so a success carries no
+	// message; the account handle and model count are proven by the calls
+	// above, not by the payload.
+	_ = body
+	return probeOutcome{valid: true}
 }
 
 // zedProbeString reads a string field from providerSpecificData.
