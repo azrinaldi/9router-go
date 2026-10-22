@@ -72,6 +72,12 @@ type LiveModel struct {
 	ContextLength int
 	MaxOutput     int
 	Capabilities  *LiveCapabilities
+	// LimitsAuthoritative marks a catalogue whose ContextLength/MaxOutput are
+	// the provider's own numbers for this exact model, not a best guess. They
+	// then outrank the static substring table, which only knows model families
+	// and would otherwise report a neighbouring model's window (Zed's
+	// claude-sonnet-5 is 1M/128k, the table says 200k/8k).
+	LimitsAuthoritative bool
 }
 
 type liveCatalogEntry struct {

@@ -40,6 +40,14 @@ import (
 // It is a variable so tests can point it at a local server.
 var zedCloudBaseURL = "https://cloud.zed.dev"
 
+// ZedCloudBaseURL exposes the host so connection tests can reach the account
+// API without duplicating the URL.
+func ZedCloudBaseURL() string { return zedCloudBaseURL }
+
+// SetZedCloudBaseURL points the client at another host. Tests use it to stand
+// a local server in for cloud.zed.dev.
+func SetZedCloudBaseURL(url string) { zedCloudBaseURL = url }
+
 const (
 	// ZedLLMTokensPath mints the short-lived LLM token.
 	ZedLLMTokensPath = "/client/llm_tokens"
@@ -134,7 +142,9 @@ var zedTokens = zedTokenStore{tokens: map[string]zedCachedToken{}}
 // token is hashed so the raw credential is never kept in a map key.
 func zedCredentialKey(creds ZedCredentials) string {
 	sum := sha256.Sum256([]byte(creds.AccessToken))
-	return creds.UserID + "|" + creds.OrganizationID + "|" + hex.EncodeToString(sum[:])
+	// The host is part of the key: a token minted by one deployment must never
+	// be handed to another.
+	return zedCloudBaseURL + "|" + creds.UserID + "|" + creds.OrganizationID + "|" + hex.EncodeToString(sum[:])
 }
 
 // ZedAuthHeader builds the layer-1 Authorization value: "{user_id} {access_token}".
