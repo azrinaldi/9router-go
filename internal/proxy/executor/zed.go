@@ -136,6 +136,8 @@ func BuildZedCompletionBody(openAIRequest []byte, wire ZedWireModel, threadID st
 		providerRequest, err = zedClaudeProviderRequest(trimmed, wire.Model)
 	case "open_ai":
 		providerRequest, err = zedResponsesProviderRequest(trimmed, wire.Model)
+	case "google":
+		providerRequest, err = zedGoogleProviderRequest(trimmed, wire.Model)
 	default:
 		return nil, fmt.Errorf("zed: unsupported wire provider %q", wire.Provider)
 	}
@@ -301,6 +303,90 @@ func zedResponsesProviderRequest(openAIBody []byte, model string) (map[string]an
 			body[key] = v
 		}
 	}
+	return body, nil
+}
+
+// zedAggregateGeminiSSE folds a Gemini event stream into the single document
+// a non-streaming client expects. The last candidate that carries text wins,
+// and the usage metadata of the last event is kept.
+func zedAggregateGeminiSSE(raw []byte) []byte {
+	var (
+		last      []byte
+		usageMeta []byte
+	)
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(payload) == 0 || string(payload) == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Candidates    []any `json:"candidates"`
+			UsageMetadata any    `json:"usageMetadata"`
+		}
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			continue
+		}
+		if chunk.UsageMetadata != nil {
+			usageMeta = payload
+		}
+		if len(chunk.Candidates) == 0 {
+			continue
+		}
+		last = payload
+	}
+	if last == nil {
+		return nil
+	}
+	// The usage metadata arrives on its own event, often after the last
+	// candidate, so it is merged into the document that is kept.
+	if usageMeta != nil {
+		var merged map[string]any
+		if err := json.Unmarshal(last, &merged); err == nil {
+			var usage any
+			if err := json.Unmarshal(usageMeta, &usage); err == nil {
+				if obj, ok := usage.(map[string]any); ok {
+					merged["usageMetadata"] = obj
+				}
+			}
+			if out, err := json.Marshal(merged); err == nil {
+				return out
+			}
+		}
+	}
+	return last
+}
+
+// zedGoogleProviderRequest builds the Google (Gemini) body nested in the
+// envelope. Zed's google provider speaks the Gemini dialect — "contents" with
+// "parts", and the generation settings under "generationConfig" — which the
+// repository's own OpenAI→Gemini converter already produces.
+func zedGoogleProviderRequest(openAIBody []byte, model string) (map[string]any, error) {
+	converted, err := translator.TranslateOpenAIToGemini(openAIBody)
+	if err != nil {
+		return nil, fmt.Errorf("zed: convert request to gemini: %w", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(converted, &body); err != nil {
+		return nil, fmt.Errorf("zed: parse gemini provider request: %w", err)
+	}
+	body["model"] = model
+	// Zed streams every completion; a non-streaming client is served from the
+	// aggregated stream.
+	body["stream"] = true
+
+	// The output budget lives in the generation config, not at the top level.
+	config, _ := body["generationConfig"].(map[string]any)
+	if config == nil {
+		config = map[string]any{}
+	}
+	if _, ok := config["maxOutputTokens"]; !ok {
+		config["maxOutputTokens"] = zedDefaultMaxOutputTokens
+	}
+	body["generationConfig"] = config
 	return body, nil
 }
 
@@ -642,10 +728,14 @@ func ForwardZed(w http.ResponseWriter, req *Request) error {
 // before they reach a bridge that only speaks SSE.
 func zedPipeStream(w http.ResponseWriter, req *Request, wire ZedWireModel, upstream io.Reader) error {
 	framed := zedJSONLToSSE(upstream)
-	if wire.Provider == "anthropic" {
+	switch wire.Provider {
+	case "anthropic":
 		return handleClaudeMessagesStream(w, req, framed)
+	case "google":
+		return zedGeminiStream(w, req, framed)
+	default:
+		return handleCodexStream(w, req, framed)
 	}
-	return handleCodexStream(w, req, framed)
 }
 
 // zedWriteWhole answers from a complete upstream body, which may be a JSON
@@ -668,6 +758,13 @@ func zedWriteWhole(w http.ResponseWriter, req *Request, wire ZedWireModel, data 
 			translator.SetUsage(req.Ctx, usage)
 		}
 		return handleClaudeMessagesNonStream(w, req, bytes.NewReader(aggregated))
+	}
+	if wire.Provider == "google" {
+		if proxy.LooksLikeSSE(data) {
+			// A streamed Gemini body: fold the events into one document.
+			return zedGeminiWhole(w, req, zedAggregateGeminiSSE(data))
+		}
+		return zedGeminiWhole(w, req, data)
 	}
 	if proxy.LooksLikeSSE(data) {
 		return handleCodexStream(w, req, bytes.NewReader(data))

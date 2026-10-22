@@ -301,20 +301,17 @@ func ZedFetchModels(ctx context.Context, client *http.Client, creds ZedCredentia
 }
 
 // ZedWireProvider maps a model id to the provider name Zed's wire protocol
-// expects. The catalogue reports these names ("anthropic", "open_ai"), and
-// they are also what the model id prefix implies.
+// expects. The catalogue reports these names ("anthropic", "google",
+// "open_ai"), and they are also what the model id prefix implies.
 func ZedWireProvider(modelID string) string {
 	id := strings.ToLower(strings.TrimSpace(modelID))
 	switch {
 	case strings.HasPrefix(id, "claude"):
 		return "anthropic"
+	case strings.HasPrefix(id, "gemini"):
+		return "google"
 	case strings.HasPrefix(id, "gpt"), strings.HasPrefix(id, "o1"), strings.HasPrefix(id, "o3"),
 		strings.HasPrefix(id, "o4"):
-		return "open_ai"
-	}
-	// Zed's own naming for the OpenAI family is "open_ai"; anything else that
-	// looks like an OpenAI model is treated as one.
-	if strings.HasPrefix(id, "gpt") || strings.Contains(id, "/gpt-") {
 		return "open_ai"
 	}
 	return ""
