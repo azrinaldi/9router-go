@@ -131,6 +131,10 @@ func (h *ChatHandler) resolveLiveCatalog(ctx context.Context, conn *models.Provi
 		fetch = func(ctx context.Context, token string) []LiveModel {
 			return h.fetchGrokCLILiveCatalog(ctx, conn, connData, token)
 		}
+	case providerID == "zed":
+		fetch = func(ctx context.Context, token string) []LiveModel {
+			return h.fetchZedLiveCatalog(ctx, conn, connData, token)
+		}
 	case isCompatibleProviderID(providerID):
 		// Upstream fetchCompatibleModelIds: custom nodes publish whatever their
 		// own /models endpoint reports.
