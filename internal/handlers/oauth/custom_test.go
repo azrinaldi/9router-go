@@ -93,3 +93,53 @@ func TestZedRoundTrip(t *testing.T) {
 		t.Errorf("not authorized: %s", rec2.Body.String())
 	}
 }
+
+// Zed's native_app_signin redirect hands the ciphertext back as *padded*
+// base64url (a 2048-bit RSA block ends in "=="). Decoding only the raw
+// form made every real browser callback fail with
+// "decode Zed token failed: illegal base64 data at input byte 342".
+func TestZedExchange_acceptsPaddedBase64URLToken(t *testing.T) {
+	handler := NewOAuthHandler(nil)
+	req := httptest.NewRequest("GET", "/api/oauth/zed/authorize", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleZedAuthorize(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	verifier := body[strings.Index(body, "zed-rsa-pkcs1:"):]
+	verifier = verifier[:strings.Index(verifier, `"`)]
+	pemBytes, err := decodeZedVerifier(verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, &priv.PublicKey, []byte("plain-token-123"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	padded := base64.URLEncoding.EncodeToString(cipher)
+	if !strings.HasSuffix(padded, "==") {
+		t.Fatalf("expected padded base64url, got %q", padded)
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(padded); err == nil {
+		t.Fatalf("precondition failed: raw decoder accepted padded input")
+	}
+
+	cb := "http://127.0.0.1:58443/?user_id=u1&access_token=" + padded
+	req2 := httptest.NewRequest("POST", "/api/oauth/zed/exchange",
+		strings.NewReader(`{"code":"`+cb+`","codeVerifier":"`+verifier+`"}`))
+	rec2 := httptest.NewRecorder()
+	handler.HandleZedExchange(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	if !strings.Contains(rec2.Body.String(), `"status":"authorized"`) {
+		t.Errorf("not authorized: %s", rec2.Body.String())
+	}
+}
