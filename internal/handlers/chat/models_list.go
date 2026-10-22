@@ -786,6 +786,13 @@ func (h *ChatHandler) registerCustomModelCaps(prefix, providerID string, cm *db.
 	if len(cm.Caps) == 0 && ctxLen == 0 && maxOut == 0 {
 		return
 	}
+	// The dashboard writes {"vision":false,"reasoning":false} when an operator
+	// adds a model from a live catalogue without filling anything in. Those
+	// are absent answers, not denials: registering them would let a blank form
+	// overwrite the capabilities the provider itself just published.
+	if ctxLen == 0 && maxOut == 0 && !anyCapTrue(cm.Caps) {
+		return
+	}
 	var caps providers.Capabilities
 	if cm.Caps["vision"] {
 		caps.Vision = true
@@ -1173,4 +1180,15 @@ func (h *ChatHandler) modelAliasTargets() map[string]string {
 		out[name] = target
 	}
 	return out
+}
+
+// anyCapTrue reports whether a custom model's capability map states anything
+// positively. A map of only-false entries carries no information.
+func anyCapTrue(caps map[string]bool) bool {
+	for _, on := range caps {
+		if on {
+			return true
+		}
+	}
+	return false
 }
