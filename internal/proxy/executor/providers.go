@@ -1122,6 +1122,11 @@ func convertOpenAIMessagesToClaude(messages []any) (systemText string, claudeMes
 			toolCallID, _ := msgMap["tool_call_id"].(string)
 			toolCallID = sanitizeToolUseID(toolCallID, toolIDMap)
 			contentVal := convertClaudeImageParts(msgMap["content"])
+			// is_error is optional to Anthropic but REQUIRED by some gateways
+			// that re-serialize the block through a strict Rust struct — Zed
+			// answers "missing field `is_error`" to a request Anthropic itself
+			// accepts. Emitting it always keeps one body valid on both.
+			isError, _ := msgMap["is_error"].(bool)
 			intermediate = append(intermediate, map[string]any{
 				"role": "user",
 				"content": []any{
@@ -1129,6 +1134,7 @@ func convertOpenAIMessagesToClaude(messages []any) (systemText string, claudeMes
 						"type":        "tool_result",
 						"tool_use_id": toolCallID,
 						"content":     contentVal,
+						"is_error":    isError,
 					},
 				},
 			})

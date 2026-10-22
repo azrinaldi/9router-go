@@ -417,10 +417,10 @@ func TestForwardZedAnthropicStreamTranslation(t *testing.T) {
 		IsStream:  true,
 		ConnData:  connData,
 		ModelName: "claude-haiku-5-5",
-		// The metric is milliseconds since StartTime, truncated. A start of
-		// time.Now() makes a sub-millisecond run record 0, which is
-		// indistinguishable from "never recorded" — so the test dates the
-		// request far enough back that any recorded value is nonzero.
+		// TTFT is milliseconds since StartTime, truncated to an integer. A
+		// warm token cache can drive the whole call under 1ms, which records
+		// 0 and is indistinguishable from "never recorded". Dating the start
+		// far enough back keeps any recorded value nonzero without waiting.
 		StartTime: time.Now().Add(-50 * time.Millisecond),
 	}
 	var ttft int64
@@ -515,7 +515,11 @@ func TestForwardZedRefreshesTokenOn401(t *testing.T) {
 		IsStream:  true,
 		ConnData:  connData,
 		ModelName: "claude-haiku-5-5",
-		StartTime: time.Now(),
+		// TTFT is milliseconds since StartTime, truncated to an integer. A
+		// warm token cache can drive the whole call under 1ms, which records
+		// 0 and is indistinguishable from "never recorded". Dating the start
+		// far enough back keeps any recorded value nonzero without waiting.
+		StartTime: time.Now().Add(-50 * time.Millisecond),
 	}
 	var ttft int64
 	req.TTFT = &ttft
