@@ -24,34 +24,17 @@ func zedToken(t *testing.T, exp int64) string {
 	return enc([]byte(`{"alg":"HS256"}`)) + "." + enc(payload) + ".sig"
 }
 
-func TestZedAccessTokenValue(t *testing.T) {
-	tests := []struct {
-		name   string
-		stored string
-		want   string
-	}{
-		{"json blob", `{"version":2,"id":"client_token_abc","token":"secret-token"}`, "secret-token"},
-		{"bare token", "secret-token", "secret-token"},
-		{"empty", "", ""},
-		{"blob without token field", `{"version":2,"id":"client_token_abc"}`, `{"version":2,"id":"client_token_abc"}`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ZedAccessTokenValue(tt.stored); got != tt.want {
-				t.Errorf("ZedAccessTokenValue(%q) = %q, want %q", tt.stored, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestZedAuthHeader(t *testing.T) {
 	creds := ZedCredentials{
 		AccessToken: `{"version":2,"id":"client_token_abc","token":"secret-token"}`,
 		UserID:      "493663",
 	}
 	// Zed authenticates the account layer as "{user_id} {access_token}", never
-	// as a bearer token.
-	if got, want := ZedAuthHeader(creds), "493663 secret-token"; got != want {
+	// as a bearer token. The access token is the credential blob verbatim:
+	// Zed validates the whole envelope, so extracting its inner "token" field
+	// is rejected with 401 even though the secret itself is unchanged.
+	want := `493663 {"version":2,"id":"client_token_abc","token":"secret-token"}`
+	if got := ZedAuthHeader(creds); got != want {
 		t.Errorf("ZedAuthHeader() = %q, want %q", got, want)
 	}
 }
@@ -144,7 +127,7 @@ func TestZedLLMTokenExchange(t *testing.T) {
 	if gotPath != ZedLLMTokensPath {
 		t.Errorf("path = %q, want %q", gotPath, ZedLLMTokensPath)
 	}
-	if want := "493663 secret-token"; gotAuth != want {
+	if want := `493663 {"version":2,"id":"client_token_abc","token":"secret-token"}`; gotAuth != want {
 		t.Errorf("Authorization = %q, want %q", gotAuth, want)
 	}
 	if gotSystemID != creds.SystemID {

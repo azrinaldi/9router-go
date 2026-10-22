@@ -341,8 +341,9 @@ func TestForwardZedTwoStageAuth(t *testing.T) {
 		t.Fatalf("ForwardZed: %v", err)
 	}
 
-	// Layer 1: the exchange is a POST to the fixed path with "{uid} {token}",
-	// the org in the body and the system id header.
+	// Layer 1: the exchange is a POST to the fixed path with "{uid} {blob}",
+	// the org in the body and the system id header. The credential blob is
+	// sent verbatim — Zed validates the whole envelope, not its inner token.
 	if probe.tokenCalls != 1 {
 		t.Fatalf("llm token calls = %d, want 1", probe.tokenCalls)
 	}
@@ -352,7 +353,7 @@ func TestForwardZedTwoStageAuth(t *testing.T) {
 	if probe.tokenPath != "/client/llm_tokens" {
 		t.Errorf("token path = %s, want /client/llm_tokens", probe.tokenPath)
 	}
-	if got, want := probe.tokenAuth, "493663 acct-auth"; got != want {
+	if got, want := probe.tokenAuth, "493663 "+blob; got != want {
 		t.Errorf("token Authorization = %q, want %q", got, want)
 	}
 	if got, want := probe.tokenSys, "sys_auth"; got != want {
@@ -521,6 +522,9 @@ func TestForwardZedRefreshesTokenOn401(t *testing.T) {
 }
 
 func TestForwardZedSurfacesUpstreamError(t *testing.T) {
+	// The probe server listens on loopback, which the SSRF guard blocks
+	// unless private networking is allowed for the process.
+	t.Setenv("ALLOW_PRIVATE_NETWORKING", "true")
 	probe := newZedProbe(t, func(w http.ResponseWriter, _ int) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"error":"plan does not include this model"}`))

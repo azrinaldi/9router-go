@@ -137,32 +137,14 @@ func zedCredentialKey(creds ZedCredentials) string {
 	return creds.UserID + "|" + creds.OrganizationID + "|" + hex.EncodeToString(sum[:])
 }
 
-// ZedAccessTokenValue extracts the raw token string from the stored credential.
-// Zed stores a JSON blob; the token is its "token" field. A bare string is
-// returned as-is so a hand-entered credential also works.
-func ZedAccessTokenValue(stored string) string {
-	stored = strings.TrimSpace(stored)
-	if stored == "" {
-		return ""
-	}
-	if !strings.HasPrefix(stored, "{") {
-		return stored
-	}
-	var blob struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal([]byte(stored), &blob); err != nil {
-		return stored
-	}
-	if blob.Token == "" {
-		return stored
-	}
-	return blob.Token
-}
-
 // ZedAuthHeader builds the layer-1 Authorization value: "{user_id} {access_token}".
+//
+// The access token is the credential blob Zed issued, verbatim — including
+// the JSON envelope. Zed validates the blob as a whole (it carries the token
+// id and version alongside the secret), so sending only its inner "token"
+// field is rejected with 401 even though the secret itself is intact.
 func ZedAuthHeader(creds ZedCredentials) string {
-	return creds.UserID + " " + ZedAccessTokenValue(creds.AccessToken)
+	return creds.UserID + " " + strings.TrimSpace(creds.AccessToken)
 }
 
 // zedLLMTokenResponse is the /client/llm_tokens payload.
