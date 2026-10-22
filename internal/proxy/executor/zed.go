@@ -307,12 +307,18 @@ func zedResponsesProviderRequest(openAIBody []byte, model string) (map[string]an
 }
 
 // zedAggregateGeminiSSE folds a Gemini event stream into the single document
-// a non-streaming client expects. The last candidate that carries text wins,
-// and the usage metadata of the last event is kept.
+// a non-streaming client expects.
+//
+// The text is concatenated across the events, not taken from the last one:
+// a thinking model emits the answer first and then a terminal event whose
+// part carries no text, so keeping the last event would drop the answer.
 func zedAggregateGeminiSSE(raw []byte) []byte {
 	var (
-		last      []byte
-		usageMeta []byte
+		texts    []string
+		usage    any
+		finish   string
+		role     = "model"
+		hasParts bool
 	)
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		line = bytes.TrimSpace(line)
@@ -324,40 +330,62 @@ func zedAggregateGeminiSSE(raw []byte) []byte {
 			continue
 		}
 		var chunk struct {
-			Candidates    []any `json:"candidates"`
-			UsageMetadata any    `json:"usageMetadata"`
+			Candidates []struct {
+				Content struct {
+					Role  string `json:"role"`
+					Parts []struct {
+						Text   string `json:"text"`
+						Thought bool   `json:"thought"`
+					} `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			} `json:"candidates"`
+			UsageMetadata any `json:"usageMetadata"`
 		}
 		if err := json.Unmarshal(payload, &chunk); err != nil {
 			continue
 		}
 		if chunk.UsageMetadata != nil {
-			usageMeta = payload
+			usage = chunk.UsageMetadata
 		}
-		if len(chunk.Candidates) == 0 {
-			continue
+		for _, c := range chunk.Candidates {
+			if c.Content.Role != "" {
+				role = c.Content.Role
+			}
+			if c.FinishReason != "" {
+				finish = c.FinishReason
+			}
+			for _, p := range c.Content.Parts {
+				if p.Thought || p.Text == "" {
+					continue
+				}
+				texts = append(texts, p.Text)
+				hasParts = true
+			}
 		}
-		last = payload
 	}
-	if last == nil {
+	if !hasParts {
 		return nil
 	}
-	// The usage metadata arrives on its own event, often after the last
-	// candidate, so it is merged into the document that is kept.
-	if usageMeta != nil {
-		var merged map[string]any
-		if err := json.Unmarshal(last, &merged); err == nil {
-			var usage any
-			if err := json.Unmarshal(usageMeta, &usage); err == nil {
-				if obj, ok := usage.(map[string]any); ok {
-					merged["usageMetadata"] = obj
-				}
-			}
-			if out, err := json.Marshal(merged); err == nil {
-				return out
-			}
-		}
+	doc := map[string]any{
+		"candidates": []any{
+			map[string]any{
+				"content": map[string]any{
+					"role":  role,
+					"parts": []any{map[string]any{"text": strings.Join(texts, "")}},
+				},
+				"finishReason": finish,
+			},
+		},
 	}
-	return last
+	if usage != nil {
+		doc["usageMetadata"] = usage
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // zedGoogleProviderRequest builds the Google (Gemini) body nested in the

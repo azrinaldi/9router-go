@@ -62,6 +62,8 @@ func TestZedGoogleProviderRequestRejectsGarbage(t *testing.T) {
 }
 
 func TestZedAggregateGeminiSSE(t *testing.T) {
+	// A thinking model emits the answer first and then a terminal event whose
+	// part carries no text. The aggregation must keep the answer.
 	stream := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"PONG\"}],\"role\":\"model\"}}]}\n\n" +
 		"data: {\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[]}}],\"usageMetadata\":{\"promptTokenCount\":9,\"candidatesTokenCount\":4}}\n\n"
 
@@ -75,6 +77,58 @@ func TestZedAggregateGeminiSSE(t *testing.T) {
 	}
 	if _, ok := doc["usageMetadata"]; !ok {
 		t.Errorf("usage metadata was dropped: %s", got)
+	}
+	candidates, _ := doc["candidates"].([]any)
+	if len(candidates) == 0 {
+		t.Fatalf("no candidates: %s", got)
+	}
+	first, _ := candidates[0].(map[string]any)
+	content, _ := first["content"].(map[string]any)
+	parts, _ := content["parts"].([]any)
+	if len(parts) == 0 {
+		t.Fatalf("no parts: %s", got)
+	}
+	part, _ := parts[0].(map[string]any)
+	if part["text"] != "PONG" {
+		t.Errorf("text = %v, want PONG", part["text"])
+	}
+}
+
+func TestZedAggregateGeminiSSEConcatenatesParts(t *testing.T) {
+	stream := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"PO\"}],\"role\":\"model\"}}]}\n\n" +
+		"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"NG\"}],\"role\":\"model\"}}]}\n\n"
+
+	got := zedAggregateGeminiSSE([]byte(stream))
+	var doc map[string]any
+	if err := json.Unmarshal(got, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	candidates, _ := doc["candidates"].([]any)
+	first, _ := candidates[0].(map[string]any)
+	content, _ := first["content"].(map[string]any)
+	parts, _ := content["parts"].([]any)
+	part, _ := parts[0].(map[string]any)
+	if part["text"] != "PONG" {
+		t.Errorf("text = %v, want PONG", part["text"])
+	}
+}
+
+func TestZedAggregateGeminiSSESkipsThoughtParts(t *testing.T) {
+	// A thinking part is not answer text and must not reach the client.
+	stream := "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"thinking...\",\"thought\":true},{\"text\":\"PONG\"}],\"role\":\"model\"}}]}\n\n"
+
+	got := zedAggregateGeminiSSE([]byte(stream))
+	var doc map[string]any
+	if err := json.Unmarshal(got, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	candidates, _ := doc["candidates"].([]any)
+	first, _ := candidates[0].(map[string]any)
+	content, _ := first["content"].(map[string]any)
+	parts, _ := content["parts"].([]any)
+	part, _ := parts[0].(map[string]any)
+	if part["text"] != "PONG" {
+		t.Errorf("text = %v, want PONG", part["text"])
 	}
 }
 
