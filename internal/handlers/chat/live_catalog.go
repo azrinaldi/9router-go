@@ -60,9 +60,26 @@ var (
 // LiveCapabilities is the capability block a live resolver can publish
 // alongside a model. Kiro does (upstream buildVariants emits
 // {thinking, agentic} per synthetic variant); grok-cli does not.
+//
+// A catalogue may also state the model's real windows and effort levels.
+// Carrying them here lets the listing publish the provider's own numbers, so
+// no client has to hard-code an override for a model the provider already
+// describes.
 type LiveCapabilities struct {
 	Thinking bool `json:"thinking"`
 	Agentic  bool `json:"agentic"`
+
+	// Vision mirrors the catalogue's supports_images.
+	Vision bool `json:"vision,omitempty"`
+	// ContextWindow / MaxOutput are the provider's own limits, in tokens.
+	ContextWindow int `json:"contextWindow,omitempty"`
+	MaxOutput     int `json:"maxOutput,omitempty"`
+	// ThinkingLevels are the effort values the model accepts, and
+	// ThinkingDefault is the one it picks when the client states none.
+	ThinkingLevels  []string `json:"thinkingLevels,omitempty"`
+	ThinkingDefault string   `json:"thinkingDefault,omitempty"`
+	// ThinkingCanDisable reports whether the client may turn thinking off.
+	ThinkingCanDisable bool `json:"thinkingCanDisable,omitempty"`
 }
 
 // LiveModel is one entry of a provider's live catalog.

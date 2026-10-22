@@ -45,14 +45,23 @@ func (h *ChatHandler) fetchZedLiveCatalog(ctx context.Context, conn *models.Prov
 		if name == "" {
 			name = m.ID
 		}
+		// Publish everything Zed states, so a client never has to override a
+		// window, an effort level, or a capability the provider already
+		// described.
 		live = append(live, LiveModel{
 			ID:            m.ID,
 			Name:          name,
 			ContextLength: m.MaxTokenCount,
 			MaxOutput:     m.MaxOutputTokens,
 			Capabilities: &LiveCapabilities{
-				Thinking: m.SupportsThinking,
-				Agentic:  m.SupportsTools,
+				Thinking:           m.SupportsThinking,
+				Agentic:            m.SupportsTools,
+				Vision:             m.SupportsImages,
+				ContextWindow:      m.MaxTokenCount,
+				MaxOutput:          m.MaxOutputTokens,
+				ThinkingLevels:     m.EffortLevels,
+				ThinkingDefault:    m.EffortDefault,
+				ThinkingCanDisable: m.SupportsDisablingThinking,
 			},
 			LimitsAuthoritative: m.MaxTokenCount > 0 || m.MaxOutputTokens > 0,
 		})

@@ -18,15 +18,26 @@ import (
 )
 
 // ZedModel is one entry of Zed's catalogue, in the shape the dashboard panel
-// renders.
+// renders. Every field Zed states is carried through, so the panel and any
+// client reading it can rely on the provider's own numbers.
 type ZedModel struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	ContextLength   int    `json:"contextLength"`
-	MaxOutputTokens int    `json:"maxOutputTokens"`
-	IsVL            bool   `json:"isVL"`
-	IsReasoning     bool   `json:"isReasoning"`
-	Description     string `json:"description"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	ContextLength   int      `json:"contextLength"`
+	MaxOutputTokens int      `json:"maxOutputTokens"`
+	IsVL            bool     `json:"isVL"`
+	IsReasoning     bool     `json:"isReasoning"`
+	Description     string   `json:"description"`
+	Provider        string   `json:"provider,omitempty"`
+	SupportsTools   bool     `json:"supportsTools"`
+	CanDisableThink bool     `json:"thinkingCanDisable"`
+	ThinkingLevels  []string `json:"thinkingLevels,omitempty"`
+	ThinkingDefault string   `json:"thinkingDefault,omitempty"`
+	ParallelTools   bool     `json:"parallelToolCalls"`
+	StreamingTools  bool     `json:"streamingTools"`
+	MaxMode         bool     `json:"maxMode"`
+	FastMode        bool     `json:"fastMode"`
+	IsLatest        bool     `json:"isLatest"`
 }
 
 // zedConnectionData is the part of a connection row the Zed catalogue needs.
@@ -72,6 +83,16 @@ func fetchZedCatalogModels(ctx context.Context, conn *models.ProviderConnection,
 			IsVL:            m.SupportsImages,
 			IsReasoning:     m.SupportsThinking,
 			Description:     m.Provider,
+			Provider:        m.Provider,
+			SupportsTools:   m.SupportsTools,
+			CanDisableThink: m.SupportsDisablingThinking,
+			ThinkingLevels:  m.EffortLevels,
+			ThinkingDefault: m.EffortDefault,
+			ParallelTools:   m.SupportsParallelToolCalls,
+			StreamingTools:  m.SupportsStreamingTools,
+			MaxMode:         m.SupportsMaxMode,
+			FastMode:        m.SupportsFastMode,
+			IsLatest:        m.IsLatest,
 		})
 	}
 	return out, nil

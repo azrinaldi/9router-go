@@ -73,18 +73,40 @@ const (
 )
 
 // ZedModel is one entry of Zed's model catalogue.
+//
+// Zed states far more about a model than a client needs to guess: the exact
+// windows, whether thinking can be turned off, which effort levels it accepts,
+// and whether it can call tools in parallel. Carrying all of it lets the
+// gateway publish the provider's own numbers instead of re-deriving them, so a
+// harness never has to hard-code an override.
 type ZedModel struct {
-	Provider         string   `json:"provider"`
-	ID               string   `json:"id"`
-	DisplayName      string   `json:"display_name"`
-	IsLatest         bool     `json:"is_latest"`
-	MaxTokenCount    int      `json:"max_token_count"`
-	MaxOutputTokens  int      `json:"max_output_tokens"`
-	SupportsTools    bool     `json:"supports_tools"`
-	SupportsImages   bool     `json:"supports_images"`
-	SupportsThinking bool     `json:"supports_thinking"`
-	IsDisabled       bool     `json:"is_disabled"`
-	EffortLevels     []string `json:"-"`
+	Provider    string `json:"provider"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	IsLatest    bool   `json:"is_latest"`
+
+	// MaxTokenCount is the context window; MaxTokenCountInMaxMode replaces it
+	// when the client asks for max mode and the model offers one.
+	MaxTokenCount          int  `json:"max_token_count"`
+	MaxTokenCountInMaxMode *int `json:"max_token_count_in_max_mode"`
+	MaxOutputTokens        int  `json:"max_output_tokens"`
+
+	SupportsTools                bool `json:"supports_tools"`
+	SupportsImages               bool `json:"supports_images"`
+	SupportsThinking             bool `json:"supports_thinking"`
+	SupportsDisablingThinking    bool `json:"supports_disabling_thinking"`
+	SupportsParallelToolCalls    bool `json:"supports_parallel_tool_calls"`
+	SupportsStreamingTools       bool `json:"supports_streaming_tools"`
+	SupportsServerSideCompaction bool `json:"supports_server_side_compaction"`
+	SupportsMaxMode              bool `json:"supports_max_mode"`
+	SupportsFastMode             bool `json:"supports_fast_mode"`
+	IsDisabled                   bool `json:"is_disabled"`
+
+	// EffortLevels are the reasoning-effort values the model accepts, in the
+	// provider's own order. EffortDefault is the level it picks when the
+	// client states none.
+	EffortLevels  []string `json:"-"`
+	EffortDefault string   `json:"-"`
 }
 
 // ZedEffortLevel is one selectable reasoning-effort level.
@@ -97,17 +119,24 @@ type ZedEffortLevel struct {
 // zedCatalogResponse is the /models payload.
 type zedCatalogResponse struct {
 	Models []struct {
-		Provider            string            `json:"provider"`
-		ID                  string            `json:"id"`
-		DisplayName         string            `json:"display_name"`
-		IsLatest            bool              `json:"is_latest"`
-		MaxTokenCount       int               `json:"max_token_count"`
-		MaxOutputTokens     int               `json:"max_output_tokens"`
-		SupportsTools       bool              `json:"supports_tools"`
-		SupportsImages      bool              `json:"supports_images"`
-		SupportsThinking    bool              `json:"supports_thinking"`
-		IsDisabled          bool              `json:"is_disabled"`
-		SupportedEffortLvls []ZedEffortLevel  `json:"supported_effort_levels"`
+		Provider                     string           `json:"provider"`
+		ID                           string           `json:"id"`
+		DisplayName                  string           `json:"display_name"`
+		IsLatest                     bool             `json:"is_latest"`
+		MaxTokenCount                int              `json:"max_token_count"`
+		MaxTokenCountInMaxMode       *int             `json:"max_token_count_in_max_mode"`
+		MaxOutputTokens              int              `json:"max_output_tokens"`
+		SupportsTools                bool             `json:"supports_tools"`
+		SupportsImages               bool             `json:"supports_images"`
+		SupportsThinking             bool             `json:"supports_thinking"`
+		SupportsDisablingThinking    bool             `json:"supports_disabling_thinking"`
+		SupportsParallelToolCalls    bool             `json:"supports_parallel_tool_calls"`
+		SupportsStreamingTools       bool             `json:"supports_streaming_tools"`
+		SupportsServerSideCompaction bool             `json:"supports_server_side_compaction"`
+		SupportsMaxMode              bool             `json:"supports_max_mode"`
+		SupportsFastMode             bool             `json:"supports_fast_mode"`
+		IsDisabled                   bool             `json:"is_disabled"`
+		SupportedEffortLvls          []ZedEffortLevel `json:"supported_effort_levels"`
 	} `json:"models"`
 }
 
@@ -288,23 +317,36 @@ func ZedFetchModels(ctx context.Context, client *http.Client, creds ZedCredentia
 	models := make([]ZedModel, 0, len(parsed.Models))
 	for _, m := range parsed.Models {
 		levels := make([]string, 0, len(m.SupportedEffortLvls))
+		defaultLevel := ""
 		for _, lvl := range m.SupportedEffortLvls {
-			if lvl.Value != "" {
-				levels = append(levels, lvl.Value)
+			if lvl.Value == "" {
+				continue
+			}
+			levels = append(levels, lvl.Value)
+			if lvl.IsDefault {
+				defaultLevel = lvl.Value
 			}
 		}
 		models = append(models, ZedModel{
-			Provider:         m.Provider,
-			ID:               m.ID,
-			DisplayName:      m.DisplayName,
-			IsLatest:         m.IsLatest,
-			MaxTokenCount:    m.MaxTokenCount,
-			MaxOutputTokens:  m.MaxOutputTokens,
-			SupportsTools:    m.SupportsTools,
-			SupportsImages:   m.SupportsImages,
-			SupportsThinking: m.SupportsThinking,
-			IsDisabled:       m.IsDisabled,
-			EffortLevels:     levels,
+			Provider:                     m.Provider,
+			ID:                           m.ID,
+			DisplayName:                  m.DisplayName,
+			IsLatest:                     m.IsLatest,
+			MaxTokenCount:                m.MaxTokenCount,
+			MaxTokenCountInMaxMode:       m.MaxTokenCountInMaxMode,
+			MaxOutputTokens:              m.MaxOutputTokens,
+			SupportsTools:                m.SupportsTools,
+			SupportsImages:               m.SupportsImages,
+			SupportsThinking:             m.SupportsThinking,
+			SupportsDisablingThinking:    m.SupportsDisablingThinking,
+			SupportsParallelToolCalls:    m.SupportsParallelToolCalls,
+			SupportsStreamingTools:       m.SupportsStreamingTools,
+			SupportsServerSideCompaction: m.SupportsServerSideCompaction,
+			SupportsMaxMode:              m.SupportsMaxMode,
+			SupportsFastMode:             m.SupportsFastMode,
+			IsDisabled:                   m.IsDisabled,
+			EffortLevels:                 levels,
+			EffortDefault:                defaultLevel,
 		})
 	}
 	return models, nil
