@@ -2510,11 +2510,13 @@
 
   // canListLiveModels mirrors the backend's list of providers with a live
   // catalogue (HandleGetConnectionModels): a button that cannot work should
-  // not render.
+  // not render. Zed belongs here because its catalogue is fetched through a
+  // two-layer auth (account token → minted LLM token), not a plain bearer
+  // /models call.
   let canListLiveModels = $derived(
     providerId.startsWith('openai-compatible-') ||
       isCompatibleNode ||
-      ['antigravity', 'gemini-cli', 'cline', 'clinepass', 'qoder', 'qoder-cn'].includes(providerId) ||
+      ['antigravity', 'gemini-cli', 'cline', 'clinepass', 'qoder', 'qoder-cn', 'zed'].includes(providerId) ||
       ModelsListURLs.has(providerId)
   )
 
