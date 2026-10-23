@@ -1155,6 +1155,39 @@ export const api = {
   geminiWebBrowserLogin: async (): Promise<{ cookie: string }> =>
     request<{ cookie: string }>('/api/providers/gemini-web/browser-login', { method: 'POST' }),
   /**
+   * Open a throwaway browser and sign in to DeepSeek Web, so the credential is
+   * captured without a browser that keeps running and rotating the same
+   * session.
+   *
+   * Answers with both halves of the credential: the userToken the API
+   * authenticates with, and the site's own cookies the WAF reads.
+   */
+  deepSeekWebBrowserLogin: async (): Promise<{ userToken: string; cookie: string }> =>
+    request<{ userToken: string; cookie: string }>('/api/providers/deepseek-web/browser-login', {
+      method: 'POST',
+    }),
+  /**
+   * Read the DeepSeek credential out of a browser that is already signed in,
+   * and answer with both halves of it: the userToken the API authenticates
+   * with, and the site's own cookies the WAF reads.
+   *
+   * The warning says what to do about a browser that is still running.
+   */
+  deepSeekWebImportChrome: async (profile?: string): Promise<{ userToken: string; cookie: string; warning: string }> =>
+    request<{ userToken: string; cookie: string; warning: string }>('/api/providers/deepseek-web/import-chrome', {
+      method: 'POST',
+      body: JSON.stringify({ profile: profile ?? '' }),
+    }),
+  /**
+   * Renew one DeepSeek Web connection's credential.
+   *
+   * A browser opens and waits for the sign-in, so this call takes as long as
+   * the operator takes to sign in. The credential that comes back is written
+   * to the row, so there is nothing to paste.
+   */
+  renewDeepSeekCredential: async (id: string): Promise<{ renewed: boolean }> =>
+    request<{ renewed: boolean }>(`/api/connections/${id}/renew-deepseek`, { method: 'POST' }),
+  /**
    * Read a session out of a browser that is already signed in, and answer with
    * the cookie header to paste. The warning says what to do about a browser
    * that is still running.
@@ -1456,6 +1489,17 @@ export const api = {
     request<{ success: boolean }>(`/api/models/custom/${encodeURIComponent(key)}`, {
       method: 'DELETE',
     }),
+  /**
+   * Removes every model one provider node carries (imported custom models plus
+   * the aliases pointing at them) in a single request — the undo for
+   * "Import from /models", which writes hundreds of rows. Catalog models that
+   * ship with the build are not stored per node and are left alone.
+   */
+  deleteProviderModels: (provider: string) =>
+    request<{ status: string; provider: string; removedModels: string[]; removedAliases: string[]; count: number }>(
+      `/api/providers/${encodeURIComponent(provider)}/models`,
+      { method: 'DELETE' }
+    ),
   saveDisabledModels: (provider: string, modelIds: string[]) =>
     request<{ success: boolean }>(`/api/models/disabled/${encodeURIComponent(provider)}`, {
       method: 'PUT',

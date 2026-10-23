@@ -65,6 +65,9 @@ func RegisterRoutes(r chi.Router, h *DashboardHandler) {
 		r.Post("/connections/{id}/test", h.HandleTestConnection)
 		r.Post("/providers/{id}/test", h.HandleTestConnection)
 		r.Get("/providers/{id}/models", h.HandleGetConnectionModels)
+		// Bulk removal for the rows the import path writes; the single-row form
+		// stays at DELETE /models/custom/{key}.
+		r.Delete("/providers/{id}/models", h.HandleDeleteProviderModels)
 		r.Get("/providers/{id}/overrides", h.HandleGetProviderOverrides)
 		r.Put("/providers/{id}/overrides", h.HandleSaveProviderOverrides)
 		r.Post("/providers/validate", h.HandleValidateProvider)
@@ -102,6 +105,8 @@ func RegisterRoutes(r chi.Router, h *DashboardHandler) {
 		r.Delete("/keys/{id}", h.HandleDeleteApiKey)
 		r.Put("/keys/{id}/toggle", h.HandleToggleApiKey)
 		r.Post("/keys/{id}/rotate", h.HandleRotateApiKey)
+		r.Get("/keys/{id}/models", h.HandleGetApiKeyModels)
+		r.Put("/keys/{id}/models", h.HandleSetApiKeyModels)
 		r.Put("/keys/{id}", h.HandleUpdateApiKey)
 
 		// F-3 Plans: reusable policy templates the keys inherit from.

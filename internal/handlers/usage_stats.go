@@ -92,6 +92,10 @@ type ProviderUsageItem struct {
 	CompletionTokens int64   `json:"completionTokens"`
 	CachedTokens     int64   `json:"cachedTokens"`
 	Cost             float64 `json:"cost"`
+	// LastUsed is the newest request timestamp in the bucket. A daily window
+	// cannot fill it (a usageDaily row is keyed by date and carries no time),
+	// so the dashboard renders it blank there rather than inventing midnight.
+	LastUsed string `json:"lastUsed,omitempty"`
 }
 
 type ModelUsageItem struct {
@@ -164,6 +168,20 @@ type UsageStatsResponse struct {
 // HandleUsageStats aggregates usage over the window named by ?period. Besides the
 // dashboard presets ("today", "24h", "7d", "30d", "60d", "all") it accepts any
 // <n>d or <n>h window, so the selector is not limited to a fixed set.
+// maskAPIKeyForStats masks an API key for usage stats display and grouping.
+// Keys <= 12 characters mask to firstChar + "***" to prevent leaking the raw
+// key in apiKeyMasked, keyName, and apiKeyKey (upstream usageRepo.js parity).
+func maskAPIKeyForStats(key string) string {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" || trimmed == "local-no-key" || trimmed == "***" {
+		return ""
+	}
+	if handlerutil.RuneCount(trimmed) <= 12 {
+		return handlerutil.RunePrefix(trimmed, 1) + "***"
+	}
+	return handlerutil.MaskAPIKey(trimmed)
+}
+
 func HandleUsageStats(repo *db.Repo) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		window := resolveUsagePeriod(r.URL.Query().Get("period"), time.Now())
@@ -216,8 +234,17 @@ func HandleUsageStats(repo *db.Repo) http.HandlerFunc {
 				if k.Name == nil || *k.Name == "" {
 					continue
 				}
+				trimmed := strings.TrimSpace(k.Key)
+				if trimmed != "" {
+					keyNames[trimmed] = *k.Name
+					if m := maskAPIKeyForStats(trimmed); m != "" {
+						keyNames[m] = *k.Name
+					}
+				}
 				keyNames[k.Key] = *k.Name
-				keyNames[handlerutil.MaskAPIKey(k.Key)] = *k.Name
+				if m := maskAPIKeyForStats(k.Key); m != "" {
+					keyNames[m] = *k.Name
+				}
 			}
 		}
 
@@ -227,22 +254,34 @@ func HandleUsageStats(repo *db.Repo) http.HandlerFunc {
 		// mask collapsed a whole team key set into a single row and attributed
 		// one key's usage to another (upstream v0.5.91, same class of fix).
 		addAPIKeyUsage := func(apiKey, rawModel, provider, providerDisplay, timestamp string, requests int, promptTok, complTok, cachedTok int64, cost float64) {
-			if apiKey == "" || apiKey == "***" {
+			trimmed := strings.TrimSpace(apiKey)
+			if trimmed == "" || trimmed == "***" {
 				apiKey = "local-no-key"
+				trimmed = "local-no-key"
 			}
 			bucketKey := apiKey + "|" + rawModel + "|" + provider
 			cur := resp.ByApiKey[bucketKey]
 			cur.RawModel = rawModel
 			cur.Provider = providerDisplay
-			cur.ApiKeyMasked = apiKey
-			cur.ApiKeyKey = apiKey
+			masked := maskAPIKeyForStats(apiKey)
+			if masked == "" {
+				masked = "local-no-key"
+			}
+			cur.ApiKeyMasked = masked
+			cur.ApiKeyKey = masked
 			switch {
+			case keyNames[trimmed] != "":
+				cur.KeyName = keyNames[trimmed]
 			case keyNames[apiKey] != "":
 				cur.KeyName = keyNames[apiKey]
-			case apiKey == "local-no-key":
+			case trimmed == "local-no-key":
 				cur.KeyName = "Local (No Key)"
 			default:
-				cur.KeyName = apiKey[:min(8, len(apiKey))] + "..."
+				if masked != "local-no-key" {
+					cur.KeyName = masked
+				} else {
+					cur.KeyName = "Local (No Key)"
+				}
 			}
 			cur.Requests += requests
 			cur.PromptTokens += promptTok
@@ -449,14 +488,15 @@ func HandleUsageStats(repo *db.Repo) http.HandlerFunc {
 		var dedupedRecent []usagetracker.RecentRequest
 		seen := make(map[string]bool)
 		for _, rh := range recentHistory {
-			if rh.PromptTokens == 0 && rh.CompletionTokens == 0 {
+			promptTok, complTok := translator.ResolveTokensCounts([]byte(rh.Tokens), rh.PromptTokens, rh.CompletionTokens)
+			if promptTok == 0 && complTok == 0 {
 				continue
 			}
 			min := ""
 			if len(rh.Timestamp) >= 16 {
 				min = rh.Timestamp[:16]
 			}
-			k := rh.Model + "|" + rh.Provider + "|" + strconv.Itoa(rh.PromptTokens) + "|" + strconv.Itoa(rh.CompletionTokens) + "|" + min
+			k := rh.Model + "|" + rh.Provider + "|" + strconv.FormatInt(promptTok, 10) + "|" + strconv.FormatInt(complTok, 10) + "|" + min
 			if seen[k] {
 				continue
 			}
@@ -472,8 +512,8 @@ func HandleUsageStats(repo *db.Repo) http.HandlerFunc {
 				Timestamp:        rh.Timestamp,
 				Model:            rh.Model,
 				Provider:         rh.Provider,
-				PromptTokens:     rh.PromptTokens,
-				CompletionTokens: rh.CompletionTokens,
+				PromptTokens:     int(promptTok),
+				CompletionTokens: int(complTok),
 				CachedTokens:     cachedTok,
 				Status:           status,
 			})
