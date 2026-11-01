@@ -336,7 +336,7 @@ func ForwardZcode(w http.ResponseWriter, req *Request) error {
 	if err != nil {
 		return fmt.Errorf("zcode: upstream: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// The plan gateway reports drain conditions (1005 "exceed quota limit",
 	// 1113 grant spent, 3012 identity gate) as a JSON envelope with HTTP 200.
@@ -353,7 +353,7 @@ func ForwardZcode(w http.ResponseWriter, req *Request) error {
 	var stall io.ReadCloser
 	if req.IsStream {
 		stall = proxy.NewStallReaderWithContext(req.Ctx, io.NopCloser(resp.Body), 0, "zcode")
-		defer stall.Close()
+		defer func() { _ = stall.Close() }()
 	}
 
 	// The upstream answers in Claude Messages on every lane, so the reply

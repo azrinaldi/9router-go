@@ -59,7 +59,7 @@ func refreshZcodeJWT(ctx context.Context, p *Params, oauthBase string) (*TokenRe
 	if err != nil {
 		return nil, fmt.Errorf("zcode: refresh request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var out struct {

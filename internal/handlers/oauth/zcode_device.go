@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -42,7 +43,9 @@ func zcodeOAuthOrigin() string {
 // (the user approves via browser → no code to type). verification_uri_complete
 // is the authorizeUrl the gateway returns and the user opens in any browser.
 // The flowId + pollToken are threaded through the session map.
-func zcodeStart(provider string) (map[string]any, error) {
+// zcodeStartContext begins a ZCode device-code (CLI) OAuth flow. The context
+// is the caller's request context, so a cancelled login stops dialling.
+func zcodeStartContext(ctx context.Context, provider string) (map[string]any, error) {
 	origin := zcodeOAuthOrigin()
 	// 32 random bytes hex-encoded (64 chars) — same shape as the bridge's
 	// crypto.randomBytes(32).toString('hex'); the gateway rejects shorter
@@ -54,7 +57,7 @@ func zcodeStart(provider string) (map[string]any, error) {
 	pollToken := hex.EncodeToString(pollBytes)
 
 	payload, _ := json.Marshal(map[string]any{"provider": "zai"})
-	req, err := http.NewRequest(http.MethodPost, origin+"/api/v1/oauth/cli/init",
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/api/v1/oauth/cli/init",
 		strings.NewReader(string(payload)))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -67,7 +70,7 @@ func zcodeStart(provider string) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ZCode device init failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var out struct {
@@ -124,7 +127,8 @@ func zcodeStart(provider string) (map[string]any, error) {
 // zcodePoll polls one tick of a ZCode device flow.
 // code = flowId (device_code from zcodeStart).
 // session must contain "pollToken".
-func zcodePoll(provider, flowID string, session map[string]any) (deviceTokens, error) {
+// zcodePollContext polls one tick of a ZCode device flow.
+func zcodePollContext(ctx context.Context, provider, flowID string, session map[string]any) (deviceTokens, error) {
 	var t deviceTokens
 	pollToken, _ := session["pollToken"].(string)
 	if pollToken == "" {
@@ -134,7 +138,7 @@ func zcodePoll(provider, flowID string, session map[string]any) (deviceTokens, e
 	origin := zcodeOAuthOrigin()
 	pollURL := origin + "/api/v1/oauth/cli/poll/" + flowID
 
-	req, err := http.NewRequest(http.MethodGet, pollURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
 	if err != nil {
 		return t, fmt.Errorf("build poll request: %w", err)
 	}
@@ -145,7 +149,7 @@ func zcodePoll(provider, flowID string, session map[string]any) (deviceTokens, e
 	if err != nil {
 		return t, fmt.Errorf("poll request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var out struct {
@@ -225,17 +229,17 @@ func zcodePoll(provider, flowID string, session map[string]any) (deviceTokens, e
 // token_version and leaves the credential-keyed row permanently unusable.
 // Returns the row id and its providerSpecificData (deviceId, sessionSeed,
 // accountUUID) to preserve.
-func zcodeExistingIdentity(db *sql.DB, email string) (string, map[string]any) {
+func zcodeExistingIdentity(ctx context.Context, db *sql.DB, email string) (string, map[string]any) {
 	email = strings.TrimSpace(email)
 	if db == nil || email == "" {
 		return "", nil
 	}
-	rows, err := db.Query(
+	rows, err := db.QueryContext(ctx,
 		"SELECT id, data FROM providerConnections WHERE provider = 'zcode' AND isActive = 1 ORDER BY updatedAt DESC")
 	if err != nil {
 		return "", nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var bestID string
 	var bestPSD map[string]any
 	for rows.Next() {
@@ -256,6 +260,9 @@ func zcodeExistingIdentity(db *sql.DB, email string) (string, map[string]any) {
 		bestID = id
 		bestPSD = parsed.PSD
 		break
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil
 	}
 	return bestID, bestPSD
 }
