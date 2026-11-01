@@ -112,27 +112,12 @@ func ForwardDeepSeekWeb(w http.ResponseWriter, req *Request) error {
 	}
 	deepSeekStealthLog(stealth, session.claim.reuse)
 
-	// An image is uploaded before the turn is sent, and the turn names what
-	// the upload returned. The upload is a separate request with its own
-	// failure: a picture the site cannot process has to be reported before the
-	// answer is written, because a turn that names an unusable file id is
-	// answered without the image and the client cannot tell that from a model
-	// that ignored it.
-	//
-	// Only a request that actually carries an image pays for this, so an
-	// ordinary turn is untouched.
-	fileIDs, err := deepSeekUploadImages(ctx, turn, accessToken, session.id, envelope.Messages)
-	if err != nil {
-		deepSeekAbandonSession(session, ctx, turn, userToken, accessToken)
-		return err
-	}
-
 	response, err := turn.completion(ctx, accessToken, deepSeekCompletionRequest{
 		ChatSessionID:   session.id,
 		ParentMessageID: session.claim.parentMessageID,
 		ModelType:       options.modelType,
 		Prompt:          session.claim.tail,
-		RefFileIDs:      fileIDs,
+		RefFileIDs:      []string{},
 		ThinkingEnabled: options.thinking,
 		SearchEnabled:   options.search,
 		// The site's own client has no non-streaming mode: every completion it
@@ -162,7 +147,7 @@ func ForwardDeepSeekWeb(w http.ResponseWriter, req *Request) error {
 				ParentMessageID: nil,
 				ModelType:       options.modelType,
 				Prompt:          prompt,
-				RefFileIDs:      fileIDs,
+				RefFileIDs:      []string{},
 				ThinkingEnabled: options.thinking,
 				SearchEnabled:   options.search,
 				Stream:          true,

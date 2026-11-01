@@ -3,7 +3,6 @@ package executor
 import (
 	"encoding/json/jsontext"
 	json "encoding/json/v2"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -119,53 +118,6 @@ func deepSeekMessageText(content jsontext.Value) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// deepSeekMessageTextWithImageMarkers is deepSeekMessageText plus a marker for
-// every image part, in content order.
-//
-// The upload is what the model actually sees, but the prompt still has to say
-// where in the text each attachment belongs: a turn that carries two images and
-// one sentence is otherwise ambiguous, and the model cannot tell which picture
-// the sentence is about. The marker numbers the attachments in the same order
-// they are uploaded, which is the order ref_file_ids carries.
-//
-// counter is shared across the conversation, so the numbering continues from
-// turn to turn and a replayed transcript names the attachments it was given.
-// It is only advanced when a marker is emitted, so text-only messages leave the
-// prompt byte-for-byte what it was.
-func deepSeekMessageTextWithImageMarkers(content jsontext.Value, counter *int) string {
-	text := deepSeekMessageText(content)
-	// A string content has no parts to walk, and no image to mark.
-	if len(content) == 0 || content[0] != '[' {
-		return text
-	}
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(content, &parts); err != nil {
-		return text
-	}
-	var images int
-	for _, part := range parts {
-		if isWebImagePartType(part.Type) {
-			images++
-		}
-	}
-	if images == 0 {
-		return text
-	}
-	lines := make([]string, 0, images)
-	for range images {
-		*counter++
-		lines = append(lines, fmt.Sprintf("[Attached image %d]", *counter))
-	}
-	marked := strings.Join(lines, "\n")
-	if text == "" {
-		return marked
-	}
-	return marked + "\n\n" + text
-}
-
 // deepSeekMessagesToPrompt renders an OpenAI conversation as the single prompt
 // string the web API accepts.
 //
@@ -196,9 +148,8 @@ func deepSeekMessagesToPrompt(messages []deepSeekMessage, historyWindow int, tra
 	toolNames := make(map[string]string)
 	lastUser := ""
 
-	imageCounter := 0
 	for _, message := range messages {
-		text := strings.TrimSpace(deepSeekMessageTextWithImageMarkers(message.Content, &imageCounter))
+		text := strings.TrimSpace(deepSeekMessageText(message.Content))
 		switch message.Role {
 		case "system":
 			if text != "" {

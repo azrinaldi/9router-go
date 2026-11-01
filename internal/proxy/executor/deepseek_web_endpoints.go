@@ -16,11 +16,6 @@ type deepSeekEndpoints struct {
 	sessionDelete string
 	powChallenge  string
 	completion    string
-	// fileUpload and fileFetch are the attachment service: an image is posted
-	// here and the turn names what it returned, because the completion
-	// endpoint has no inline-image field.
-	fileUpload string
-	fileFetch  string
 }
 
 // deepSeekEndpointsFor derives the endpoint set from a configured base URL.
@@ -43,8 +38,6 @@ func deepSeekEndpointsFor(baseURL string) deepSeekEndpoints {
 		sessionDelete: root + "/chat_session/delete",
 		powChallenge:  root + "/chat/create_pow_challenge",
 		completion:    completion,
-		fileUpload:    root + "/file/upload_file",
-		fileFetch:     root + "/file/fetch_files",
 	}
 }
 

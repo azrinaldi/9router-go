@@ -64,16 +64,6 @@ type deepSeekFakeUpstream struct {
 	// the status those failures carry; zero means 500.
 	failCompletions int
 	failStatus      int
-	// fileStatus is the processing state the file service reports for an
-	// upload. Empty means SUCCESS, which is what a healthy image returns.
-	fileStatus string
-	// filePollCount counts how many status reads the upload made, so a test
-	// can tell "waited for processing" from "used the id the upload returned".
-	filePollCount int
-	// uploadPowTarget records the target_path the upload's challenge asked
-	// for. A challenge minted for the completion is refused on the upload
-	// path, so this is the difference between a working upload and a 4xx.
-	uploadPowTarget string
 }
 
 // countCalls reports how many requests the upstream served on path.
@@ -173,20 +163,6 @@ func (f *deepSeekFakeUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	case "/api/v0/chat/create_pow_challenge":
 		prefix := f.challengeSalt + "_" + fmt.Sprint(f.challengeExpire) + "_"
-		// The challenge is minted for the path the caller names, and the site
-		// refuses one presented to a different path.
-		targetPath := deepSeekCompletionPath
-		var asked struct {
-			TargetPath string `json:"target_path"`
-		}
-		if err := json.Unmarshal(f.bodies[r.URL.Path], &asked); err == nil && asked.TargetPath != "" {
-			targetPath = asked.TargetPath
-		}
-		if targetPath == deepSeekFileUploadPath {
-			f.mu.Lock()
-			f.uploadPowTarget = targetPath
-			f.mu.Unlock()
-		}
 		_ = json.MarshalWrite(w, map[string]any{
 			"code": 0,
 			"data": map[string]any{"biz_data": map[string]any{
@@ -197,34 +173,9 @@ func (f *deepSeekFakeUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request)
 					"difficulty":  2,
 					"expire_at":   f.challengeExpire,
 					"signature":   "sig-1",
-					"target_path": targetPath,
+					"target_path": deepSeekCompletionPath,
 				},
 			}},
-		})
-	case deepSeekFileUploadPath:
-		_ = json.MarshalWrite(w, map[string]any{
-			"code": 0,
-			"data": map[string]any{
-				"biz_code": 0,
-				"biz_data": map[string]any{"id": "file-1", "status": "PENDING"},
-			},
-		})
-	case deepSeekFileFetchPath:
-		status := f.fileStatus
-		if status == "" {
-			status = "SUCCESS"
-		}
-		f.mu.Lock()
-		f.filePollCount++
-		f.mu.Unlock()
-		_ = json.MarshalWrite(w, map[string]any{
-			"code": 0,
-			"data": map[string]any{
-				"biz_code": 0,
-				"biz_data": map[string]any{
-					"files": []map[string]any{{"id": "file-1", "status": status}},
-				},
-			},
 		})
 
 	case deepSeekCompletionPath:

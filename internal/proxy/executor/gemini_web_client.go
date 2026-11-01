@@ -381,7 +381,7 @@ func (s *geminiWebSession) streamTurn(
 		modelNumber = model.Number
 	}
 	inner := geminiWebBuildInner(prompt, thinkingLevel, modelNumber, attachments)
-	uuid := webRequestUUID()
+	uuid := geminiWebRequestUUID()
 	inner[geminiWebSlotRequestUUID] = uuid
 	innerJSON, err := json.Marshal(inner)
 	if err != nil {
@@ -459,6 +459,28 @@ type geminiWebUpstreamStatus struct {
 
 func (e *geminiWebUpstreamStatus) Error() string {
 	return fmt.Sprintf("gemini-web: %s answered HTTP %d", e.Operation, e.Status)
+}
+
+// geminiWebRequestUUID mints the per-request uuid the turn echoes in two places.
+func geminiWebRequestUUID() string {
+	var raw [16]byte
+	value := uint64(time.Now().UnixNano())
+	for i := range raw {
+		raw[i] = byte(value >> (8 * (i % 8)))
+		value = value*6364136223846793005 + 1442695040888963407
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	hexDigits := "0123456789ABCDEF"
+	out := make([]byte, 0, 36)
+	for i, b := range raw {
+		switch i {
+		case 4, 6, 8, 10:
+			out = append(out, '-')
+		}
+		out = append(out, hexDigits[b>>4], hexDigits[b&0x0f])
+	}
+	return string(out)
 }
 
 // errGeminiWebSessionRefused is the site's unauthenticated answer to a session

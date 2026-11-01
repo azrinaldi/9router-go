@@ -560,16 +560,7 @@ func solveDeepSeekPow(ctx context.Context, challenge deepSeekPowChallenge) (stri
 // it from that conversation's page, so the Referer names the page rather
 // than the site root.
 func (t deepSeekTurn) requestPow(ctx context.Context, accessToken, chatSessionID string) (string, error) {
-	return t.requestPowFor(ctx, accessToken, chatSessionID, deepSeekCompletionPath)
-}
-
-// requestPowFor fetches and answers a challenge minted for one target path.
-//
-// The challenge is bound to the endpoint it will be presented to: one issued
-// for the completion is rejected on the upload path, which is why the image
-// upload asks for a challenge of its own.
-func (t deepSeekTurn) requestPowFor(ctx context.Context, accessToken, chatSessionID, targetPath string) (string, error) {
-	payload := map[string]any{"target_path": targetPath}
+	payload := map[string]any{"target_path": deepSeekCompletionPath}
 	data, err := t.do(ctx, http.MethodPost, t.endpoints.powChallenge, accessToken, map[string]string{
 		"referer": deepSeekChatPageURL(t.origin, chatSessionID),
 	}, payload)
