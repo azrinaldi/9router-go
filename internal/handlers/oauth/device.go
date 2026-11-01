@@ -22,7 +22,7 @@ import (
 var deviceProviders = []string{
 	"qoder", "qoder-cn", "kilocode", "grok-cli", "github", "kiro", "kimi", "kimi-coding",
 	"codebuddy-cn", "codebuddy-intl", "muse", "minimax-code", "minimax-code-global", "nous",
-	"glm",
+	"glm", "zcode",
 }
 
 func deviceSupported(p string) bool {
@@ -207,6 +207,8 @@ func deviceStart(provider, region, startURL, authMethod string) (map[string]any,
 		return nousStart()
 	case "glm":
 		return glmStart()
+	case "zcode":
+		return zcodeStart(provider)
 	default:
 		return nil, fmt.Errorf("unsupported provider")
 	}
@@ -486,6 +488,8 @@ func devicePoll(provider, code string, session map[string]any) (deviceTokens, st
 		t, err = nousPoll(code)
 	case "glm":
 		t, err = glmPoll(session, code)
+	case "zcode":
+		t, err = zcodePoll(provider, code, session)
 	default:
 		return t, "error", "unsupported provider"
 	}
@@ -516,6 +520,7 @@ func (h *OAuthHandler) saveDeviceConnection(provider string, t deviceTokens) sav
 		"qoder": "Qoder", "qoder-cn": "Qoder CN", "kilocode": "KiloCode", "grok-cli": "Grok CLI",
 		"github": "GitHub", "kiro": "Kiro", "kimi": "Kimi", "muse": "Muse",
 		"codebuddy-cn": "CodeBuddy", "codebuddy-intl": "CodeBuddy",
+		"zcode":        "ZCode",
 		"nous": "Nous Research", "glm": "Zai GLM Coding",
 	}[provider])
 	id := provider + "-" + shortHash(t.access)
@@ -534,6 +539,22 @@ func (h *OAuthHandler) saveDeviceConnection(provider string, t deviceTokens) sav
 		dataMap["apiKey"] = ak
 	}
 	delete(psd, "apiKey")
+	// A re-login mints a new plan JWT, so hashing the credential would create a
+	// second active row for the same z.ai account — and the new token bumps
+	// token_version, killing the old row that rotation would still dial. Anchor
+	// the connection on the account instead and keep the identity the gateway
+	// already knows: a device that changes on every re-login is exactly what the
+	// identity gate flags.
+	if provider == "zcode" && h.Repo != nil && h.Repo.RawDB() != nil {
+		if prevID, prevPSD := zcodeExistingIdentity(h.Repo.RawDB(), email); prevID != "" {
+			id = prevID
+			for _, key := range []string{"deviceId", "sessionSeed", "accountUUID"} {
+				if v, ok := prevPSD[key].(string); ok && v != "" {
+					psd[key] = v
+				}
+			}
+		}
+	}
 	dataMap["providerSpecificData"] = psd
 	if t.expiresIn > 0 {
 		dataMap["expiresAt"] = time.Now().Add(time.Duration(t.expiresIn) * time.Second).UTC().Format(time.RFC3339)
