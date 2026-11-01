@@ -141,6 +141,7 @@ export const PROVIDER_ID_TO_ALIAS: Record<string, string> = {
   "xiaomi-mimo": "mimo",
   "xiaomi-tokenplan": "xmtp",
   "zed": "zd",
+  "zcode": "zcode",
   "atmorouter": "atmo",
   "runcrate": "rc",
 };
@@ -5963,6 +5964,16 @@ export const BUILTIN_MODELS_BY_PROVIDER: Record<string, ProviderModel[]> = {
     }
   ],
   "zd": [],
+  "zcode": [
+    {
+      "id": "glm-5.3",
+      "name": "GLM 5.3"
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM 5.3 Flash (Vision)"
+    }
+  ],
   "atmo": [
     { "id": "cc/claude-sonnet-4-6", "name": "Claude Sonnet 4.6" },
     { "id": "cc/claude-opus-4-7", "name": "Claude Opus 4.7" },

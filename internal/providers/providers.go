@@ -1413,6 +1413,19 @@ var KnownProviders = map[string]ProviderConfig{
 			"content-type": "application/json",
 		},
 	},
+	// zcode is the ZCode desktop client's start-plan lane. The executor
+	// (internal/proxy/executor/zcode.go) drives internal/zcode directly — the
+	// gateway content-inspects the system blocks and meter-meters identity
+	// headers, so the generic forwarder must never touch this URL. The entry
+	// exists for getProviderConfig resolution and the model/usage plumbing;
+	// FormatClaude marks an upstream that answers in Claude Messages shape.
+	"zcode": {
+		BaseURL:              "https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages",
+		AuthHeader:           "Authorization",
+		AuthScheme:           "bearer",
+		Format:               FormatClaude,
+		PreserveCacheControl: true,
+	},
 	"atmorouter": {
 		BaseURL:    "https://atmorouter.dev/v1/chat/completions",
 		AuthHeader: "Authorization",

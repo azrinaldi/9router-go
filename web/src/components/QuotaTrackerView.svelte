@@ -71,7 +71,12 @@
     type QuotaFetchTarget,
   } from './quota/fetch'
 
-  const CONNECTIONS_PAGE_SIZE = 20
+  // The backend paginates at 20 rows; with 30+ eligible connections one
+  // provider's rows can land entirely on page 2 while the UI keeps page 1,
+  // so "All providers" shows nothing from that provider. The backend applies
+  // no cross-panel state, so request the full eligible set instead of
+  // relying on the default page window.
+  const CONNECTIONS_PAGE_SIZE = 40
 
   /**
    * The shape one provider's auto-ping settings key holds on the server.

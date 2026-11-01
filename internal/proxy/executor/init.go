@@ -49,6 +49,10 @@ func RegisterAll() {
 	Register("gitlab", func() Executor { return ForwardOpenAI })
 	Register("glm-cn", func() Executor { return ForwardZai })
 	Register("glm", func() Executor { return ForwardZai })
+	// zcode: the ZCode plan lane needs the identity system + header face
+	// (internal/zcode); the generic forwarder would trip the gateway's
+	// content inspection (405 3012) or the signed-lane split (429 1113).
+	Register("zcode", func() Executor { return ForwardZcode })
 	Register("nebius", func() Executor { return ForwardOpenAI })
 	Register("minimax", func() Executor { return ForwardOpenAI })
 	Register("kimi", func() Executor { return ForwardKimi })

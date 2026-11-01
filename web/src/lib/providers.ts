@@ -473,6 +473,21 @@ export const PROVIDER_CATALOG: ProviderCatalogItem[] = [
     ]
   },
   {
+    "id": "zcode",
+    "name": "ZCode",
+    "category": "oauth",
+    "alias": "zcode",
+    "color": "#3B82F6",
+    "icon": "smart_toy",
+    "website": "https://zcode.z.ai",
+    "notice": {"signupUrl":"https://zcode.z.ai"},
+    "authType": "oauth",
+    "noAuth": false,
+    "serviceKinds": [
+      "llm"
+    ]
+  },
+  {
     "id": "atmorouter",
     "name": "AtmoRouter",
     "category": "apikey",

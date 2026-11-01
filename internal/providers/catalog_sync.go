@@ -95,6 +95,7 @@ var (
 var ProviderAliases = map[string]string{
 	"glm":           "zai",
 	"glm-cn":        "zhipuai",
+	"zcode":         "zai",
 	"claude":        "anthropic",
 	"gemini":        "google",
 	"kimi":          "moonshotai",

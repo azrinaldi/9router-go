@@ -100,6 +100,10 @@ func fetchProviderUsage(ctx context.Context, provider string, data map[string]an
 		return fetchMiniMaxCodeUsage(ctx, provider, accessToken, psdStr(psd, "realUserID")), true
 	case "glm", "glm-cn":
 		return fetchGLMUsage(ctx, provider, firstNonEmptyStr(apiKey, accessToken)), true
+	case "zcode":
+		// Native zcode plan connection: the token is the plan JWT and the
+		// readout comes from the billing endpoints (internal/zcode).
+		return fetchZCodePlanUsage(ctx, firstNonEmptyStr(apiKey, accessToken)), true
 	default:
 		// zcode-bridge custom node (anthropic-compatible-zcode): quota comes
 		// from the bridge's own /v1/quota, not a vendor API.

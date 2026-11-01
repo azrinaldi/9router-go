@@ -147,6 +147,10 @@ var usageSupportedProviders = []string{
 	"minimax-code-global", "ollama",
 	"opencode-go", "opencode-zen", "qoder", "qoder-cn", "trae",
 	"vercel-ai-gateway", "xiaomi-mimo", "zed",
+	// The native zcode lane (GLM coding plan over the zcode OAuth JWT) is a
+	// real provider the dashboard tracks usage for; without this entry its
+	// accounts vanish from the providers page and the Quota Tracker.
+	"zcode",
 }
 
 // usageApikeyProviders mirrors upstream USAGE_APIKEY_PROVIDERS
