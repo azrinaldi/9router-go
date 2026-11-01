@@ -792,7 +792,10 @@ func (h *ChatHandler) tryForwardWithConnection(f forwardRequestParams) error {
 	if connData != nil && (connData.ProxyPoolID != "" || connData.ConnectionProxyEnabled || connData.StrictProxy) {
 		ctx = internalproxy.WithStrictProxy(ctx, true)
 	}
-	if providers.IsLocalByDesign(provider) {
+	// A registry-local provider, or a custom node whose configured endpoint
+	// is loopback (claudeCompatibleConfig marks the bridge case), may dial
+	// 127.0.0.1 despite the SSRF guard.
+	if providers.IsLocalByDesign(provider) || (providerCfg != nil && providerCfg.LocalByDesign) {
 		ctx = internalproxy.WithAllowLoopback(ctx)
 	}
 	sessionID := handlerutil.GetSessionID(ctx)
@@ -858,7 +861,15 @@ func (h *ChatHandler) tryForwardWithConnection(f forwardRequestParams) error {
 		})
 	}
 
-	if exec := executor.Get(provider); exec != nil {
+	exec := executor.Get(provider)
+	if exec == nil && upstreamClaude && !claudeNative {
+		// A custom Messages-speaking node has no registered executor, but the
+		// Claude->OpenAI translation of the reply lives in the default one.
+		// Forwarding through forwardRequest instead would hand the raw Messages
+		// JSON to a Chat Completions client.
+		exec = executor.Default()
+	}
+	if exec != nil {
 		execReq := &executor.Request{
 			Ctx:            ctx,
 			Client:         httpClient,

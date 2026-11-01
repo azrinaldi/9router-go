@@ -101,6 +101,11 @@ func fetchProviderUsage(ctx context.Context, provider string, data map[string]an
 	case "glm", "glm-cn":
 		return fetchGLMUsage(ctx, provider, firstNonEmptyStr(apiKey, accessToken)), true
 	default:
+		// zcode-bridge custom node (anthropic-compatible-zcode): quota comes
+		// from the bridge's own /v1/quota, not a vendor API.
+		if isCompatibleZCodeProvider(provider) {
+			return fetchZCodeUsage(ctx, firstNonEmptyStr(apiKey, accessToken), connectionBaseURL(data)), true
+		}
 		return usageResult{}, false
 	}
 }

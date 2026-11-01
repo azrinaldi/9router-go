@@ -19,12 +19,15 @@ func TestCodebuddyConversationHeaders_FamilyPresent(t *testing.T) {
 		t.Errorf("X-Conversation-ID = %q, want uuid", h["X-Conversation-ID"])
 	}
 	for _, k := range []string{"X-Request-ID", "X-Conversation-Request-ID", "X-Conversation-Message-ID"} {
-		if !hex32RE.MatchString(h[k]) {
-			t.Errorf("%s = %q, want 32 hex chars", k, h[k])
+		if !uuidRE.MatchString(h[k]) {
+			t.Errorf("%s = %q, want uuid format", k, h[k])
 		}
 	}
 	if h["X-Conversation-Message-ID"] != h["X-Request-ID"] {
 		t.Errorf("X-Conversation-Message-ID (%s) must match X-Request-ID (%s)", h["X-Conversation-Message-ID"], h["X-Request-ID"])
+	}
+	if h["X-Conversation-Request-ID"] != h["X-Request-ID"] {
+		t.Errorf("X-Conversation-Request-ID (%s) must match X-Request-ID (%s)", h["X-Conversation-Request-ID"], h["X-Request-ID"])
 	}
 }
 
@@ -111,8 +114,8 @@ func TestCodebuddyHeaders_ChannelVerification(t *testing.T) {
 	if cnHeaders["X-Stainless-Lang"] != "js" || cnHeaders["X-Stainless-Runtime"] != "node" {
 		t.Errorf("cn Stainless headers mismatch: lang=%q runtime=%q", cnHeaders["X-Stainless-Lang"], cnHeaders["X-Stainless-Runtime"])
 	}
-	if !hex32RE.MatchString(cnHeaders["X-Request-ID"]) {
-		t.Errorf("cn X-Request-ID = %q, want 32 hex chars", cnHeaders["X-Request-ID"])
+	if !uuidRE.MatchString(cnHeaders["X-Request-ID"]) {
+		t.Errorf("cn X-Request-ID = %q, want uuid", cnHeaders["X-Request-ID"])
 	}
 	if cnHeaders["X-Conversation-ID"] == "" {
 		t.Error("cn X-Conversation-ID must be present")
@@ -127,7 +130,7 @@ func TestCodebuddyHeaders_ChannelVerification(t *testing.T) {
 	if intlHeaders["X-Domain"] != "www.codebuddy.ai" {
 		t.Errorf("intl X-Domain = %q, want www.codebuddy.ai", intlHeaders["X-Domain"])
 	}
-	if !hex32RE.MatchString(intlHeaders["X-Request-ID"]) {
-		t.Errorf("intl X-Request-ID = %q, want 32 hex chars", intlHeaders["X-Request-ID"])
+	if !uuidRE.MatchString(intlHeaders["X-Request-ID"]) {
+		t.Errorf("intl X-Request-ID = %q, want uuid", intlHeaders["X-Request-ID"])
 	}
 }
