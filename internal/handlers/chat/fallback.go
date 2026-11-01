@@ -923,8 +923,8 @@ func (h *ChatHandler) tryForwardWithConnection(f forwardRequestParams) error {
 		ctx = internalproxy.WithStrictProxy(ctx, true)
 	}
 	// A registry-local provider, or a custom node whose configured endpoint
-	// is loopback (claudeCompatibleConfig marks the bridge case), may dial
-	// 127.0.0.1 despite the SSRF guard.
+	// is loopback (LocalByDesign is stamped on the resolved config), may
+	// dial 127.0.0.1 despite the SSRF guard.
 	if providers.IsLocalByDesign(provider) || (providerCfg != nil && providerCfg.LocalByDesign) {
 		ctx = internalproxy.WithAllowLoopback(ctx)
 	}
