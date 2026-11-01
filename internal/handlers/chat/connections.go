@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -695,10 +697,22 @@ func (h *ChatHandler) getProviderConfig(provider string, connData *ConnectionDat
 			cloned.BaseURL = baseURL
 			baseCfg = &cloned
 		} else {
-			baseCfg = &providers.ProviderConfig{
-				BaseURL:    baseURL,
-				AuthHeader: constants.HeaderAuthorization,
-				AuthScheme: constants.AuthSchemeBearer,
+			// The override is completed to a chat-completions route: the dashboard
+			// stores a bare host for a self-hosted endpoint (the Ollama Local host
+			// field is typed as "http://192.168.1.10:11434"), and a host alone names
+			// no route, so the POST used to land on the server root. A URL that
+			// already names a route is passed through untouched.
+			baseURL := chatCompletionsURL(connData.BaseURL)
+			if cfg, ok := providers.KnownProviders[provider]; ok {
+				cloned := cfg
+				cloned.BaseURL = baseURL
+				baseCfg = &cloned
+			} else {
+				baseCfg = &providers.ProviderConfig{
+					BaseURL:    baseURL,
+					AuthHeader: constants.HeaderAuthorization,
+					AuthScheme: constants.AuthSchemeBearer,
+				}
 			}
 		}
 	} else if cfg, ok := providers.KnownProviders[provider]; ok {
@@ -940,6 +954,70 @@ func connectionAPIType(connData *ConnectionData) string {
 	}
 	apiType, _ := connData.ProviderSpecificData["apiType"].(string)
 	return apiType
+}
+
+// isAnthropicCompatibleProvider reports whether a provider id names a custom
+// anthropic-compatible node: the bare literal or the composed
+// `anthropic-compatible-<suffix>` id (composeProviderNodeID).
+func isAnthropicCompatibleProvider(provider string) bool {
+	return provider == "anthropic-compatible" || strings.HasPrefix(provider, "anthropic-compatible-")
+}
+
+// claudeMessagesURL completes a configured endpoint into the Anthropic
+// Messages route. The dashboard stores anthropic-compatible node baseUrls
+// stripped of a trailing "/messages" (provider_nodes.go), so the version
+// prefix decides: ".../v1" gets "/messages" appended, anything else gets
+// "/v1/messages". A URL that already names the route passes through.
+func claudeMessagesURL(baseURL string) string {
+	url := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if url == "" {
+		return baseURL
+	}
+	if strings.HasSuffix(url, "/messages") {
+		return url
+	}
+	if strings.HasSuffix(url, "/v1") {
+		return url + "/messages"
+	}
+	return url + "/v1/messages"
+}
+
+// isLoopbackBase reports whether a configured upstream host is loopback:
+// a self-hosted bridge on this machine, which the SSRF guard must be told
+// to allow (LocalByDesign).
+func isLoopbackBase(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// claudeCompatibleConfig builds the provider config for an anthropic-compatible
+// custom node: Messages route, raw x-api-key auth (spec shape; a bridge that
+// also accepts Authorization: Bearer works either way), and Format claude so
+// servesClaudeMessages/upstreamClaude treat the wire correctly - a
+// Chat Completions client gets OpenAI->Claude conversion and back, a Messages
+// client is passed through untouched.
+func claudeCompatibleConfig(baseURL string) *providers.ProviderConfig {
+	return &providers.ProviderConfig{
+		BaseURL:               claudeMessagesURL(baseURL),
+		AuthHeader:            "x-api-key",
+		AuthScheme:            "raw",
+		Format:                providers.FormatClaude,
+		RequireClaudeToolType: true,
+		// A loopback bridge is a local-by-design upstream; the fallback path
+		// translates that into WithAllowLoopback past the SSRF guard.
+		LocalByDesign: isLoopbackBase(baseURL),
+		StaticHeaders: map[string]string{
+			"anthropic-version": "2023-06-01",
+		},
+	}
 }
 
 // chatCompletionsURL completes a configured endpoint into the chat-completions

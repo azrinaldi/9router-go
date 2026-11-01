@@ -922,7 +922,10 @@ func (h *ChatHandler) tryForwardWithConnection(f forwardRequestParams) error {
 	if connData != nil && (connData.ProxyPoolID != "" || connData.ConnectionProxyEnabled || connData.StrictProxy) {
 		ctx = internalproxy.WithStrictProxy(ctx, true)
 	}
-	if providers.IsLocalByDesign(provider) {
+	// A registry-local provider, or a custom node whose configured endpoint
+	// is loopback (claudeCompatibleConfig marks the bridge case), may dial
+	// 127.0.0.1 despite the SSRF guard.
+	if providers.IsLocalByDesign(provider) || (providerCfg != nil && providerCfg.LocalByDesign) {
 		ctx = internalproxy.WithAllowLoopback(ctx)
 	}
 	sessionID := handlerutil.GetSessionID(ctx)

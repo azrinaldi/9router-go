@@ -277,8 +277,7 @@ func transformCodebuddyBody(body []byte) ([]byte, error) {
 }
 
 func codebuddyHeaders(req *Request, cfg *providers.ProviderConfig, body []byte) map[string]string {
-	reqID := strings.ReplaceAll(uuid.NewString(), "-", "")
-	convReqID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	reqID := uuid.NewString()
 
 	// The CN lane tracks the current Tencent CLI build (anti-ban: an outdated
 	// UA reads as a silent/bot client); the intl lane keeps its own identity,
@@ -340,7 +339,7 @@ func codebuddyHeaders(req *Request, cfg *providers.ProviderConfig, body []byte) 
 		"X-Stainless-Retry-Count":     "0",
 		"X-Request-ID":                reqID,
 		"X-Conversation-ID":           convID,
-		"X-Conversation-Request-ID":   convReqID,
+		"X-Conversation-Request-ID":   reqID,
 		"X-Conversation-Message-ID":   reqID,
 		"X-Agent-Intent":              "craft",
 		"X-Agent-Purpose":             "conversation",
