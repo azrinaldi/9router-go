@@ -111,9 +111,6 @@ var ProviderAliases = map[string]string{
 	// zen/* model missed the catalog and fell through to the substring table
 	// (128000/4096) even though the catalog carries the real window.
 	"openai-compatible-chat-opencode-free-bridge": "opencode",
-	// The zcode-bridge node (anthropic-compatible-zcode) serves GLM weights;
-	// models.dev files them under `zai`, same as the glm provider above.
-	"anthropic-compatible-zcode": "zai",
 }
 
 // GetCatalogState returns the current synchronization state.

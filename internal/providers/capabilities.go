@@ -641,50 +641,6 @@ func init() {
 		"gemini-4-argon":        geminiWebCaps,
 	}
 
-	// deepseek-web overrides the generic `*deepseek*` rows for the same reason
-	// gemini-web does: the web surface is not the API surface. The site's own
-	// composer takes an image — the bytes go to its file service and the
-	// returned id travels in `ref_file_ids` — but it has no audio, video or
-	// PDF slot, and the search flag is a per-model switch the executor sets
-	// from the requested id rather than a capability the client chooses.
-	//
-	// Declaring vision here is what makes a client send the image at all: the
-	// row previously fell through to `*deepseek-v4*`, which is the API's
-	// text-only shape, so an image was dropped before dispatch and a client
-	// that could have used the attachment never offered it.
-	// The thinking levels are the fixture's, not a guess: this lane can turn
-	// thinking off for the v4 family (`none high max`) and cannot for the
-	// reasoner names (`high max`), while the plain chat model publishes no
-	// level at all because it never reasons.
-	deepSeekWebCaps := Capabilities{Vision: true, Tools: true, Reasoning: true, ThinkingFormat: "deepseek", ThinkingCanDisable: new(true)}
-	deepSeekWebReasonerCaps := Capabilities{Vision: true, Tools: true, Reasoning: true, ThinkingFormat: "deepseek", ThinkingCanDisable: new(false)}
-	deepSeekWebChatCaps := Capabilities{Vision: true, Tools: true, ThinkingFormat: "deepseek", ThinkingCanDisable: new(false)}
-	providerCapabilities["deepseek-web"] = map[string]Capabilities{
-		"deepseek-v4-pro":                deepSeekWebCaps,
-		"deepseek-v4-pro-think":          deepSeekWebCaps,
-		"deepseek-v4-pro-search":         deepSeekWebCaps,
-		"deepseek-v4-pro-think-search":   deepSeekWebCaps,
-		"deepseek-v4-flash":              deepSeekWebCaps,
-		"deepseek-v4-flash-think":        deepSeekWebCaps,
-		"deepseek-v4-flash-search":       deepSeekWebCaps,
-		"deepseek-v4-flash-think-search": deepSeekWebCaps,
-		"deepseek-chat":                  deepSeekWebChatCaps,
-		"deepseek-reasoner":              deepSeekWebReasonerCaps,
-		"DeepSeek-R1":                    deepSeekWebReasonerCaps,
-		"DeepSeek-R1-Search":             deepSeekWebReasonerCaps,
-		"DeepSeek-V3.2":                  deepSeekWebCaps,
-		"DeepSeek-Search":                deepSeekWebCaps,
-	}
-	// The aliases must carry the same table as the canonical id, the way `cx`
-	// mirrors `codex`. A request names its provider however the client wrote
-	// it, and `GetCapabilitiesForModel` looks the table up by exactly that
-	// string: a `ds-web/…` request that found no table fell through to the
-	// generic `*deepseek-v4*` row, which is the text-only API shape, so the
-	// capacity adapter saw vision:false and rerouted an image to another
-	// provider while the executor could have served it.
-	providerCapabilities["ds-web"] = providerCapabilities["deepseek-web"]
-	providerCapabilities["gweb"] = providerCapabilities["gemini-web"]
-
 	providerCapabilities["opencode-go"] = map[string]Capabilities{
 		"glm-5.3-flash": {
 			Vision: true, VideoInput: true, PDF: true, Reasoning: true, Tools: true,
